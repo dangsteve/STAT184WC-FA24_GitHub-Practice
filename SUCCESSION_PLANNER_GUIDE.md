@@ -4,8 +4,10 @@ One HTML file, one CSV. No install, no server, no accounts.
 
 ## Getting started
 
-1. Put `succession_planner.html` and your CSV (start from `succession_data.csv`)
-   anywhere — a shared drive works fine.
+1. Put `succession_planner.html` and your CSV anywhere — a shared drive works
+   fine. Two datasets are included: **`succession_demo.csv`** (small — ideal for
+   demos and learning; see `DEMO_SCRIPT.md` for a 5-minute walkthrough) and
+   **`succession_data.csv`** (full-size test data).
 2. Open `succession_planner.html` in Chrome or Edge.
 3. Click **Open CSV** and pick the database file (you can also just drag the .csv
    onto the window).
