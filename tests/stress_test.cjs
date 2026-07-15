@@ -1114,6 +1114,91 @@ function parseCsvRows(text) {
     assert(def2 && def2.includes('department'), 'default survives CSV round-trip');
   });
 
+  await test('piece bank lists only off-slate people and search filters it', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    const check = await page.evaluate(() => {
+      const onSlate = new Set(__APP__.slateFor('R-CEO').map(s => s.personId));
+      const inc = __APP__.roles.find(r => r.id === 'R-CEO').incumbentPersonId;
+      const bankIds = [...document.querySelectorAll('.bank-piece')].map(x => x.dataset.personId);
+      return { count: bankIds.length, clean: bankIds.every(id => !onSlate.has(id) && id !== inc) };
+    });
+    assert(check.count > 0, 'bank has pieces');
+    assert(check.clean, 'nobody already on the slate or throne');
+    const name = await page.evaluate(() => document.querySelector('.bank-piece .bp-main b').textContent);
+    await page.fill('#chessBankSearch', name);
+    await page.waitForTimeout(100);
+    const filtered = await page.evaluate(() => [...document.querySelectorAll('.bank-piece .bp-main b')].map(b => b.textContent));
+    assert(filtered.length >= 1 && filtered.every(n => n === name || n.includes(name)), 'search filters bank');
+    await page.fill('#chessBankSearch', '');
+  });
+  await test('bank piece dropped on the open board stages a New pawn; Save creates the CSV row', async () => {
+    const pid = await page.evaluate(() => document.querySelector('.bank-piece').dataset.personId);
+    const before = await page.evaluate(() => __APP__.slateFor('R-CEO').length);
+    await simulateDrag(page, `.bank-piece[data-person-id="${pid}"]`, `#chessOverlay .chess-grid`);
+    const stagedState = await page.evaluate(pid => ({
+      newFlag: document.querySelectorAll('#chessOverlay .square .new-flag').length,
+      lastEntry: __APP__.chess.order[__APP__.chess.order.length - 1],
+      real: __APP__.slateFor('R-CEO').length,
+    }), pid);
+    assertEq(stagedState.newFlag, 1, 'New badge on the staged piece');
+    assertEq(stagedState.lastEntry, 'NEW::' + pid, 'staged at the end');
+    assertEq(stagedState.real, before, 'no real row before save');
+    await page.click('[data-action="chessSave"]');
+    const after = await page.evaluate(pid => __APP__.successors.find(s => s.roleId === 'R-CEO' && s.personId === pid), pid);
+    assert(after, 'slate row created on save');
+    assertEq(after.ranking, before + 1, 'joined at the last rank');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'SUCCESSOR' && r.successorRoleId === 'R-CEO' && r.personId === pid), 'persisted to CSV');
+  });
+  await test('bank piece dropped on a square takes that exact spot', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    const pid = await page.evaluate(() => document.querySelector('.bank-piece').dataset.personId);
+    const firstEntry = await page.evaluate(() => __APP__.chess.order[0]);
+    await simulateDrag(page, `.bank-piece[data-person-id="${pid}"]`, `#chessOverlay .square[data-succ-id="${firstEntry}"]`);
+    const order = await page.evaluate(() => [...__APP__.chess.order]);
+    assertEq(order[0], 'NEW::' + pid, 'staged into 1st-in-line (Queen) spot');
+    assertEq(order[1], firstEntry, 'previous queen shifted down');
+    // remove the staged piece — board returns to clean
+    await page.click(`[data-action="chessRemoveNew"][data-entry-id="NEW::${pid}"]`);
+    const order2 = await page.evaluate(() => [...__APP__.chess.order]);
+    assertEq(order2[0], firstEntry, 'staged piece removed');
+    await page.evaluate(() => __APP__.closeChessView(true));
+  });
+  await test('bank piece dropped on the throne takes the seat on save', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const onSlate = new Set(__APP__.slateFor('R-CEO').map(s => s.personId));
+      const inc = __APP__.roles.find(r => r.id === 'R-CEO').incumbentPersonId;
+      const p = __APP__.people.find(p => !onSlate.has(p.id) && p.id !== inc
+        && __APP__.evaluateRules({ personId: p.id, roleId: 'R-CEO', readiness: p.readiness || '1-2 Years', source: p.source || 'Internal', candidateType: p.candidateType || 'Successor', confidence: p.confidence || 'Medium' }).blocks.length === 0);
+      return { pid: p.id, name: p.name };
+    });
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    await page.fill('#chessBankSearch', t.pid);
+    await page.waitForTimeout(100);
+    await simulateDrag(page, `.bank-piece[data-person-id="${t.pid}"]`, `#chessOverlay .throne`);
+    const throne = await page.locator('#chessOverlay .throne.staged .t-name').textContent();
+    assertEq(throne.trim(), t.name, 'bank person staged on the throne');
+    await page.click('[data-action="chessSave"]');
+    const inc = await page.evaluate(() => __APP__.roles.find(r => r.id === 'R-CEO').incumbentPersonId);
+    assertEq(inc, t.pid, 'seat taken on save');
+    const rows = parseCsvRows(await csvOf(page));
+    assertEq(rows.find(r => r.recordType === 'ROLE' && r.roleId === 'R-CEO').incumbentPersonId, t.pid, 'CSV updated');
+  });
+  await test('discarding staged bank additions leaves no trace', async () => {
+    await loadBase(page);
+    const before = await csvOf(page);
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    const pid = await page.evaluate(() => document.querySelector('.bank-piece').dataset.personId);
+    await simulateDrag(page, `.bank-piece[data-person-id="${pid}"]`, `#chessOverlay .chess-grid`);
+    dialogs = [];
+    await page.click('[data-action="chessClose"]');
+    assert(dialogs.length === 1, 'discard confirm shown');
+    assertEq(await csvOf(page), before, 'nothing changed');
+  });
+
   /* ===================================================================
      14. CSV SIMPLICITY (future columns, auto tabs, tree inference)
      =================================================================== */

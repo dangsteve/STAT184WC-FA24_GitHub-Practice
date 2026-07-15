@@ -277,6 +277,18 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
 .square .pinfo b{color:var(--ink);font-weight:600}
 .square .plink{position:absolute;top:8px;right:8px}
 .chess-empty{padding:40px;text-align:center;color:var(--muted)}
+.chess-grid.dragover{outline:2px solid var(--primary);outline-offset:2px}
+.chess-cols{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:16px;align-items:start}
+.chess-bank{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;position:sticky;top:76px}
+.bank-list{display:flex;flex-direction:column;gap:6px;max-height:60vh;overflow:auto;margin-top:8px;scrollbar-width:thin}
+.bank-piece{display:flex;gap:9px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 9px;background:#fafbfd;cursor:grab;font-size:12px}
+.bank-piece:hover{border-color:var(--primary);box-shadow:var(--shadow)}
+.bp-glyph{font-size:20px;line-height:1;flex:none}
+.bp-main{min-width:0;display:flex;flex-direction:column}
+.bp-main b{font-size:12px;line-height:1.3}
+.bp-main span{color:var(--muted);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.square .new-flag{position:absolute;top:8px;left:8px}
+@media(max-width:1000px){.chess-cols{grid-template-columns:1fr}.chess-bank{position:static}}
 .chess-fields-wrap{position:relative}
 .chess-fields-menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);width:280px;padding:12px;z-index:20}
 .chess-fields-menu label{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);font-weight:500;margin:5px 0;text-transform:none;letter-spacing:0}
@@ -1721,7 +1733,44 @@ function openChessView(roleId){
   const r=role(roleId);
   if(!r){notice('ERR','Role not found.');return}
   closeDrawer();
-  chess={roleId,order:slateFor(roleId).map(s=>s.id),stagedIncumbent:null,dirtyMoves:false,menuOpen:false,fields:[...chessActiveFields()]};
+  chess={roleId,order:slateFor(roleId).map(s=>s.id),stagedIncumbent:null,dirtyMoves:false,menuOpen:false,fields:[...chessActiveFields()],bankQuery:''};
+  renderChessView();
+}
+/* staged additions from the bank live in the order list as "NEW::<personId>" until Save */
+function chessRow(entryId){
+  if(!chess||!entryId)return null;
+  if(String(entryId).startsWith('NEW::')){
+    const pid=String(entryId).slice(5);
+    const p=person(pid);
+    if(!p)return null;
+    return{id:entryId,roleId:chess.roleId,personId:pid,readiness:p.readiness||'1-2 Years',source:p.source||'Internal',candidateType:p.candidateType||'Successor',confidence:p.confidence||'Medium',ranking:chess.order.indexOf(entryId)+1,notes:'',approved:false,autoMoveQueued:false,_isNew:true};
+  }
+  return successors.find(s=>s.id===entryId)||null;
+}
+function chessBankPeople(){
+  const r=role(chess.roleId);
+  const onBoard=new Set(chess.order.map(id=>chessRow(id)?.personId).filter(Boolean));
+  const q=norm(chess.bankQuery||'');
+  return people.filter(p=>!onBoard.has(p.id)&&p.id!==r.incumbentPersonId&&[p.id,p.name,p.title,p.department,p.location].join(' ').toLowerCase().includes(q)).slice(0,80);
+}
+function chessBankListHtml(){
+  return chessBankPeople().map(p=>`<div class="bank-piece" draggable="true" data-drag="chessBank" data-person-id="${attr(p.id)}" title="Drag onto the board to add — onto a piece to take its spot, or onto the throne"><span class="bp-glyph">&#9823;</span><span class="bp-main"><b>${esc(p.name)}</b><span>${esc(p.title||p.department||p.id)}</span></span></div>`).join('')||'<div class="hint">No one matches.</div>';
+}
+function chessAddFromBank(pid,beforeEntryId){
+  if(!chess||!person(pid))return;
+  const onBoard=chess.order.some(id=>chessRow(id)?.personId===pid);
+  if(onBoard||successors.some(s=>s.roleId===chess.roleId&&s.personId===pid)){notice('WARN',`${personName(pid)} is already on this slate.`);return}
+  const entry='NEW::'+pid;
+  const idx=beforeEntryId?chess.order.indexOf(beforeEntryId):-1;
+  if(idx>=0)chess.order.splice(idx,0,entry);else chess.order.push(entry);
+  chess.dirtyMoves=true;
+  renderChessView();
+}
+function chessRemoveNew(entryId){
+  if(!chess)return;
+  chess.order=chess.order.filter(id=>id!==entryId);
+  if(chess.stagedIncumbent===entryId)chess.stagedIncumbent=null;
+  chess.dirtyMoves=true;
   renderChessView();
 }
 function closeChessView(force=false){
@@ -1764,7 +1813,7 @@ function chessSetDefaultFields(){
 function chessCallouts(r){
   const out=[];
   if(chess.stagedIncumbent){
-    const s=successors.find(x=>x.id===chess.stagedIncumbent);
+    const s=chessRow(chess.stagedIncumbent);
     if(s){
       const e=evaluateRules(s);
       e.blocks.forEach(m=>out.push(['err','Blocked by rule: '+m]));
@@ -1780,20 +1829,27 @@ function renderChessView(){
   if(!chess)return;
   const r=role(chess.roleId);
   if(!r){closeChessView(true);return}
-  chess.order=chess.order.filter(id=>successors.some(s=>s.id===id&&s.roleId===chess.roleId));
+  chess.order=chess.order.filter(id=>{
+    if(String(id).startsWith('NEW::')){
+      const pid=String(id).slice(5);
+      return person(pid)&&!successors.some(s=>s.roleId===chess.roleId&&s.personId===pid);
+    }
+    return successors.some(s=>s.id===id&&s.roleId===chess.roleId);
+  });
   slateFor(chess.roleId).forEach(s=>{if(!chess.order.includes(s.id))chess.order.push(s.id)});
   if(chess.stagedIncumbent&&!chess.order.includes(chess.stagedIncumbent))chess.stagedIncumbent=null;
   const fields=chess.fields;
-  const staged=chess.stagedIncumbent?successors.find(s=>s.id===chess.stagedIncumbent):null;
+  const staged=chess.stagedIncumbent?chessRow(chess.stagedIncumbent):null;
   const pending=chess.dirtyMoves||!!staged;
   const callouts=chessCallouts(r).map(([cls,m])=>`<div class="notice ${cls}">${esc(m)}</div>`).join('');
   const fieldRows=s=>fields.map(f=>{const val=displayFieldValue(s,f);return val?`<div><b>${esc(chessFieldLabel(f))}:</b> ${esc(val)}</div>`:''}).join('');
   const gridSquares=chess.order.filter(id=>id!==chess.stagedIncumbent).map((sid,i)=>{
-    const s=successors.find(x=>x.id===sid);
+    const s=chessRow(sid);
     if(!s)return '';
     const piece=chessPieceFor(i);
-    return `<div class="square ${i%2?'alt':''}" draggable="true" data-drag="chessPiece" data-drop="chessPiece" data-succ-id="${attr(s.id)}" title="Drag onto another piece to swap, or onto the throne to take the seat">
-      <span class="plink"><button class="icon-btn" data-action="openPerson" data-person-id="${attr(s.personId)}" title="Open profile">&#9776;</button></span>
+    return `<div class="square ${i%2?'alt':''}" draggable="true" data-drag="chessPiece" data-drop="chessPiece" data-succ-id="${attr(String(sid))}" title="Drag onto another piece to swap, or onto the throne to take the seat">
+      ${s._isNew?'<span class="badge green new-flag">New</span>':''}
+      <span class="plink"><button class="icon-btn" data-action="openPerson" data-person-id="${attr(s.personId)}" title="Open profile">&#9776;</button>${s._isNew?`<button class="icon-btn bad" data-action="chessRemoveNew" data-entry-id="${attr(String(sid))}" title="Remove this staged piece">&#10005;</button>`:''}</span>
       <span class="pglyph">${piece[0]}</span>
       <span class="prank">${piece[1]} · ${ordinal(i+1)} in line${s.approved?' · &#10003;':''}${s.autoMoveQueued?' · &#9889;':''}</span>
       <span class="pname">${esc(personName(s.personId))}</span>
@@ -1827,7 +1883,15 @@ function renderChessView(){
     <div class="chess-body">
       <div class="chess-callouts">${callouts}</div>
       <div class="throne-row">${throne}${stepsDown}</div>
-      ${gridSquares?`<div class="chess-grid">${gridSquares}</div>`:'<div class="chess-empty">No candidates on this slate yet — close this view and drag candidates onto the role first.</div>'}
+      <div class="chess-cols">
+        <div class="chess-grid" data-drop="chessGrid">${gridSquares||'<div class="chess-empty">No candidates yet — drag pieces from the bank to build this slate.</div>'}</div>
+        <div class="chess-bank">
+          <div class="side-title">Piece Bank</div>
+          <div class="hint">Everyone not on this slate. Drag onto a piece to take its spot, onto the open board to join last, or onto the throne.</div>
+          <input id="chessBankSearch" data-input="chessBank" placeholder="Search people&hellip;" value="${attr(chess.bankQuery||'')}" style="margin-top:8px">
+          <div class="bank-list" id="chessBankList">${chessBankListHtml()}</div>
+        </div>
+      </div>
     </div>`;
   el('chessOverlay').classList.remove('hidden');
 }
@@ -1835,15 +1899,30 @@ function saveChessView(){
   if(!chess)return;
   const r=role(chess.roleId);
   if(!r){closeChessView(true);return}
-  const staged=chess.stagedIncumbent?successors.find(s=>s.id===chess.stagedIncumbent):null;
-  if(staged){
-    const e=evaluateRules(staged);
+  const stagedProbe=chess.stagedIncumbent?chessRow(chess.stagedIncumbent):null;
+  if(chess.stagedIncumbent&&!stagedProbe){notice('ERR','Cannot save: the staged candidate&rsquo;s record is missing.');renderChessView();return}
+  if(stagedProbe){
+    const e=evaluateRules(stagedProbe);
     if(e.blocks.length){e.blocks.forEach(m=>notice('ERR',m));renderChessView();return}
-    if(!person(staged.personId)){notice('ERR','Cannot save: the candidate&rsquo;s person record is missing.');renderChessView();return}
+    if(!person(stagedProbe.personId)){notice('ERR','Cannot save: the candidate&rsquo;s person record is missing.');renderChessView();return}
   }
-  if(!chess.dirtyMoves&&!staged){closeChessView(true);return}
+  const newEntries=chess.order.filter(id=>String(id).startsWith('NEW::'));
+  if(!chess.dirtyMoves&&!stagedProbe&&!newEntries.length){closeChessView(true);return}
   pushUndo('Chess board save');
   automationDepth=0;
+  // staged bank additions become real slate rows now
+  const idMap=new Map();
+  newEntries.forEach(entry=>{
+    const pid=String(entry).slice(5),p=person(pid);
+    if(!p||successors.some(s=>s.roleId===chess.roleId&&s.personId===pid)){idMap.set(entry,null);return}
+    const row={id:uid('S'),roleId:chess.roleId,personId:pid,readiness:p.readiness||'1-2 Years',source:p.source||'Internal',candidateType:p.candidateType||'Successor',confidence:p.confidence||'Medium',ranking:999,notes:'',approved:false,autoMoveQueued:false};
+    successors.push(row);
+    idMap.set(entry,row.id);
+    log('Candidate Added',`${p.name} added to ${r.title} on the chess board`);
+  });
+  chess.order=chess.order.map(id=>idMap.has(id)?idMap.get(id):id).filter(Boolean);
+  if(chess.stagedIncumbent&&idMap.has(chess.stagedIncumbent))chess.stagedIncumbent=idMap.get(chess.stagedIncumbent);
+  const staged=chess.stagedIncumbent?successors.find(s=>s.id===chess.stagedIncumbent):null;
   const rankOf=new Map(chess.order.map((id,i)=>[id,i+1]));
   successors.filter(s=>s.roleId===chess.roleId&&rankOf.has(s.id)).forEach(s=>s.ranking=rankOf.get(s.id));
   normalizeRanks(chess.roleId);
@@ -1921,6 +2000,7 @@ const ACTIONS={
   chessSave:()=>saveChessView(),
   chessResetSeat:()=>chessResetSeat(),
   chessFieldsMenu:()=>{if(chess){chess.menuOpen=!chess.menuOpen;renderChessView()}},
+  chessRemoveNew:d=>chessRemoveNew(d.entryId),
   chessSetDefault:()=>chessSetDefaultFields(),
   applyInferred:()=>applyInferredLines(),
   downloadTemplate:()=>{el('moreMenu').classList.remove('open');downloadTemplate()},
@@ -1954,6 +2034,11 @@ document.addEventListener('input',e=>{
   const t=e.target;
   if(t.dataset.input==='render'){clearTimeout(searchTimer);searchTimer=setTimeout(render,140)}
   if(t.dataset.input==='pieceBox'){clearTimeout(searchTimer);searchTimer=setTimeout(renderPieceBox,140)}
+  if(t.dataset.input==='chessBank'&&chess){
+    chess.bankQuery=t.value;
+    const list=el('chessBankList');
+    if(list)list.innerHTML=chessBankListHtml(); // update the list only, so typing keeps focus
+  }
 });
 
 /* ---------- drag & drop ---------- */
@@ -1964,6 +2049,7 @@ document.addEventListener('dragstart',e=>{
   if(elm.dataset.drag==='succ'){e.dataTransfer.setData('succId',elm.dataset.succId);e.dataTransfer.setData('personId',elm.dataset.personId)}
   else if(elm.dataset.drag==='person')e.dataTransfer.setData('personId',elm.dataset.personId);
   else if(elm.dataset.drag==='chessPiece')e.dataTransfer.setData('chessSucc',elm.dataset.succId);
+  else if(elm.dataset.drag==='chessBank')e.dataTransfer.setData('chessBank',elm.dataset.personId);
 });
 document.addEventListener('dragover',e=>{
   if([...e.dataTransfer.types].includes('Files')){e.preventDefault();return}
@@ -1989,6 +2075,17 @@ document.addEventListener('drop',async e=>{
   if(chessSucc){
     if(t.dataset.drop==='chessPiece')return chessSwap(chessSucc,t.dataset.succId);
     if(t.dataset.drop==='chessKing')return chessTakeSeat(chessSucc);
+    return;
+  }
+  const bankPid=e.dataTransfer.getData('chessBank');
+  if(bankPid){
+    if(t.dataset.drop==='chessPiece')return chessAddFromBank(bankPid,t.dataset.succId);
+    if(t.dataset.drop==='chessGrid')return chessAddFromBank(bankPid,null);
+    if(t.dataset.drop==='chessKing'){
+      chessAddFromBank(bankPid,null);
+      const entry='NEW::'+bankPid;
+      if(chess&&chess.order.includes(entry))chessTakeSeat(entry);
+    }
     return;
   }
   if(t.dataset.drop==='succ'){
@@ -2037,6 +2134,7 @@ window.__APP__={
   openPersonDrawer,savePerson,deletePerson,openRoleDrawer,saveRole,deleteRole,openRuleDrawer,saveRule,deleteRule,toggleRule,openBoardDrawer,
   openAddChooser,closeDrawer,addCustomValue,valuesForField,handleCustomSelect,isRoleVacant,slateFor,normalizeRanks,runVacancyAutomation,
   openChessView,closeChessView,saveChessView,chessSwap,chessTakeSeat,chessToggleField,chessSetDefaultFields,
+  chessAddFromBank,chessRemoveNew,chessRow,
   get chess(){return chess},get chessDefaultFields(){return chessDefaultFields},
   computeTreeParents,applyInferredLines,downloadTemplate,extraColumnNames,extraKeysFor,prettyBoardName,
 };

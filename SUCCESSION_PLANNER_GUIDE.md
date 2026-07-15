@@ -44,6 +44,11 @@ succession board:
 - **Drag a piece onto the throne to take the seat.** The old incumbent steps
   down; if the new person holds another role, you'll see a callout that saving
   leaves it vacant (backfill rules and the auto-move queue run as usual).
+- **Piece Bank** (right side): everyone who isn't on this slate yet, with
+  search. Drag a bank piece onto another piece to take that exact spot (others
+  shift down), onto the open board to join last in line, or straight onto the
+  throne. Staged pieces show a green **New** badge and can be removed before
+  saving.
 - **Nothing happens until you press Save.** Rules still apply — a blocked
   candidate shows a red callout and Save refuses. Close discards after asking.
 - **Fields shown** picks which details appear under every piece at once (one
