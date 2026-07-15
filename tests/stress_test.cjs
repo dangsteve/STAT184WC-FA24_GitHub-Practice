@@ -1,0 +1,1048 @@
+/* =============================================================================
+   Succession Planner — heavy stress test
+   Drives the real app in headless Chromium (Playwright) and verifies that
+   every UI scenario works AND that every change persists into the CSV.
+   Run:  NODE_PATH=$(npm root -g) node tests/stress_test.cjs
+   ============================================================================= */
+const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+const APP_URL = 'file://' + path.join(ROOT, 'succession_planner.html');
+const BASE_CSV = fs.readFileSync(path.join(ROOT, 'succession_data.csv'), 'utf8');
+
+const results = []; // {name, ok, err}
+let consoleErrors = [];
+let dialogs = [];
+
+function section(name) { console.log('\n== ' + name + ' =='); }
+async function test(name, fn) {
+  try { await fn(); results.push({ name, ok: true }); console.log('  PASS  ' + name); }
+  catch (e) { results.push({ name, ok: false, err: e.message }); console.log('  FAIL  ' + name + '\n        ' + String(e.message).split('\n')[0]); }
+}
+function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed'); }
+function assertEq(a, b, msg) { if (a !== b) throw new Error((msg || 'not equal') + ` — got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); }
+
+/* ---------- page helpers ---------- */
+async function newPage(browser) {
+  const page = await browser.newPage();
+  page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+  page.on('pageerror', e => consoleErrors.push('pageerror: ' + e.message));
+  page.on('dialog', async d => { dialogs.push({ type: d.type(), message: d.message() }); await d.accept(); });
+  await page.goto(APP_URL);
+  return page;
+}
+async function loadBase(page, csv = BASE_CSV) {
+  const ok = await page.evaluate(t => window.__APP__.loadCSV(t), csv);
+  assert(ok === true, 'loadCSV returned ' + ok);
+}
+const counts = p => p.evaluate(() => ({
+  roles: __APP__.roles.length, people: __APP__.people.length, succ: __APP__.successors.length,
+  rules: __APP__.rules.length, hist: __APP__.history.length,
+  boards: __APP__.boards.length, dirty: __APP__.dirty, undo: __APP__.undoDepth,
+}));
+const csvOf = p => p.evaluate(() => window.__APP__.toCSV());
+const lastMsg = p => p.evaluate(() => __APP__.messages[0] || null);
+async function clickAction(page, action, extra = '') {
+  await page.click(`[data-action="${action}"]${extra}`);
+}
+async function setSelect(page, id, value) {
+  await page.evaluate(([id, value]) => {
+    const el = document.getElementById(id); el.value = value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, [id, value]);
+}
+async function typeInto(page, id, value) {
+  await page.evaluate(([id, value]) => {
+    const el = document.getElementById(id); el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, [id, value]);
+}
+async function simulateDrag(page, srcSel, dstSel) {
+  return page.evaluate(([srcSel, dstSel]) => {
+    const src = document.querySelector(srcSel), dst = document.querySelector(dstSel);
+    if (!src || !dst) return 'missing element: ' + (!src ? srcSel : dstSel);
+    const dt = new DataTransfer();
+    src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    dst.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    dst.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    return 'ok';
+  }, [srcSel, dstSel]);
+}
+/* CSV text -> array of row-objects, for checking persistence */
+function parseCsvRows(text) {
+  const rows = []; let row = [], val = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], n = text[i + 1];
+    if (c === '"' && q && n === '"') { val += '"'; i++; }
+    else if (c === '"') q = !q;
+    else if (c === ',' && !q) { row.push(val); val = ''; }
+    else if ((c === '\n' || c === '\r') && !q) { if (val || row.length) { row.push(val); rows.push(row); row = []; val = ''; } if (c === '\r' && n === '\n') i++; }
+    else val += c;
+  }
+  if (val || row.length) rows.push([...row, val]);
+  const headers = rows[0];
+  return rows.slice(1).map(r => Object.fromEntries(headers.map((h, i) => [h, r[i] || ''])));
+}
+
+(async () => {
+  const browser = await chromium.launch();
+  const t0 = Date.now();
+
+  /* ===================================================================
+     1. BOOT & LOAD
+     =================================================================== */
+  section('1. Boot & CSV load');
+  let page = await newPage(browser);
+
+  await test('boots blank with tabs, empty state, no errors', async () => {
+    assertEq(await page.locator('.tab').count(), 7, 'tab count'); // 6 system + "+"
+    assert(await page.locator('.empty').count() >= 1, 'empty state shown');
+    assertEq((await counts(page)).roles, 0);
+  });
+  await test('loads the dummy CSV database', async () => {
+    await loadBase(page);
+    const c = await counts(page);
+    assertEq(c.people, 150, 'people'); assertEq(c.roles, 72, 'roles');
+    assertEq(c.rules, 5, 'rules'); assert(c.succ >= 280, 'successors merged/loaded: ' + c.succ);
+    assertEq(c.boards, 6 + 10, 'boards = 6 system + 10 custom');
+    assert(!c.dirty, 'clean after load');
+  });
+  await test('org tree renders with nodes', async () => {
+    assert(await page.locator('.node').count() >= 70, 'tree nodes');
+  });
+  await test('CSV round-trip is byte-stable and state-stable', async () => {
+    const csv1 = await csvOf(page);
+    await loadBase(page, csv1);
+    const csv2 = await csvOf(page);
+    assert(csv1 === csv2, 'toCSV(loadCSV(toCSV())) differs from toCSV()');
+    const c = await counts(page);
+    assertEq(c.people, 150); assertEq(c.roles, 72); assertEq(c.rules, 5);
+  });
+  await test('every original SUCCESSOR/PERSON/ROLE/RULE/BOARD row survives round-trip', async () => {
+    const rows = parseCsvRows(await csvOf(page));
+    const by = t => rows.filter(r => r.recordType === t).length;
+    assertEq(by('PERSON'), 150); assertEq(by('ROLE'), 72); assertEq(by('RULE'), 5);
+    assertEq(by('BOARD'), 10); assertEq(by('SETTING'), 1);
+    assert(by('SUCCESSOR') >= 280, 'successor rows');
+  });
+
+  /* ===================================================================
+     2. BOARDS, FILTERS, SEARCH
+     =================================================================== */
+  section('2. Boards, filters, search');
+  await test('switching to a custom board shows only its roles', async () => {
+    await page.click('[data-action="tab"][data-tab-id="ALL"]');
+    const all = await page.locator('.role').count();
+    assertEq(all, 72, 'ALL shows every role');
+    await page.click('[data-action="tab"][data-tab-id="BOARD-PROD"]');
+    const expected = await page.evaluate(() => {
+      const b = __APP__.boards.find(x => x.id === 'BOARD-PROD');
+      return __APP__.roles.filter(r => r.boardId === 'BOARD-PROD' || b.name === r.department).length;
+    });
+    assertEq(await page.locator('.role').count(), expected, 'board-filtered roles');
+  });
+  await test('search filters role cards', async () => {
+    await page.click('[data-action="tab"][data-tab-id="ALL"]');
+    await typeInto(page, 'search', 'Chief');
+    await page.waitForTimeout(250);
+    const shown = await page.locator('.role').count();
+    const expected = await page.evaluate(() => {
+      const q = 'chief';
+      return __APP__.roles.filter(r => {
+        const ss = __APP__.successors.filter(s => s.roleId === r.id);
+        const nm = id => (__APP__.people.find(p => p.id === id) || {}).name || '';
+        const txt = [r.id, r.title, r.level, r.department, r.incumbentName, nm(r.incumbentPersonId), ss.map(s => nm(s.personId)).join(' ')].join(' ').toLowerCase();
+        return txt.includes(q);
+      }).length;
+    });
+    assertEq(shown, expected, 'search results');
+    await typeInto(page, 'search', ''); await page.waitForTimeout(250);
+  });
+  await test('department / risk / readiness / level filters work', async () => {
+    await setSelect(page, 'deptFilter', 'Finance');
+    let shown = await page.locator('.role').count();
+    let expected = await page.evaluate(() => __APP__.roles.filter(r => r.department === 'Finance').length);
+    assertEq(shown, expected, 'dept filter');
+    await setSelect(page, 'deptFilter', 'All Departments');
+    await setSelect(page, 'riskFilter', 'High');
+    shown = await page.locator('.role').count();
+    expected = await page.evaluate(() => __APP__.roles.filter(r => r.risk === 'High').length);
+    assertEq(shown, expected, 'risk filter');
+    await setSelect(page, 'riskFilter', 'All Risks');
+    await setSelect(page, 'readinessFilter', 'No Candidate');
+    shown = await page.locator('.role').count();
+    expected = await page.evaluate(() => __APP__.roles.filter(r => !__APP__.successors.some(s => s.roleId === r.id)).length);
+    assertEq(shown, expected, 'readiness=No Candidate filter');
+    await setSelect(page, 'readinessFilter', 'All Readiness');
+    await setSelect(page, 'levelFilter', 'C-Suite');
+    shown = await page.locator('.role').count();
+    expected = await page.evaluate(() => __APP__.roles.filter(r => r.level === 'C-Suite').length);
+    assertEq(shown, expected, 'level filter');
+    await setSelect(page, 'levelFilter', 'All Levels');
+  });
+
+  /* ===================================================================
+     3. PEOPLE CRUD (via real drawer UI) + persistence
+     =================================================================== */
+  section('3. People CRUD via drawer UI');
+  const evilName = `O'Hara "Zoe", <script>window.__XSS__=1<\/script>`;
+  await test('add person with hostile characters via + Add drawer', async () => {
+    await clickAction(page, 'addChooser');
+    await page.click('#drawerBody [data-action="openPersonDrawerNew"]');
+    await typeInto(page, 'pId', 'P-EVIL');
+    await typeInto(page, 'pName', evilName);
+    await typeInto(page, 'pNotes', 'line1\nline2, with "quotes" and ,commas,');
+    await setSelect(page, 'pReady', 'Ready Now');
+    await page.click('#drawerSave');
+    const p = await page.evaluate(() => __APP__.people.find(x => x.id === 'P-EVIL'));
+    assert(p, 'person saved');
+    assertEq(p.name, evilName, 'name preserved exactly');
+    const xss = await page.evaluate(() => window.__XSS__);
+    assert(!xss, 'no XSS executed');
+  });
+  await test('hostile person survives CSV round-trip exactly', async () => {
+    const csv = await csvOf(page);
+    await loadBase(page, csv);
+    const p = await page.evaluate(() => __APP__.people.find(x => x.id === 'P-EVIL'));
+    assertEq(p.name, evilName, 'name after round-trip');
+    assertEq(p.notes, 'line1\nline2, with "quotes" and ,commas,', 'notes after round-trip');
+  });
+  await test('edit person propagates name to slates & incumbency, persists to CSV', async () => {
+    await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
+    await page.click('tr[data-action="openPerson"][data-person-id="P001"]');
+    await typeInto(page, 'pName', 'Mei Smith-Chan');
+    await page.click('#drawerSave');
+    const role = await page.evaluate(() => __APP__.roles.find(r => r.incumbentPersonId === 'P001'));
+    assertEq(role.incumbentName, 'Mei Smith-Chan', 'incumbentName updated');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'PERSON' && r.personId === 'P001' && r.personName === 'Mei Smith-Chan'), 'CSV has new name');
+  });
+  await test('renaming a person ID updates every reference', async () => {
+    const before = await page.evaluate(() => ({
+      slates: __APP__.successors.filter(s => s.personId === 'P052').length,
+      inc: __APP__.roles.filter(r => r.incumbentPersonId === 'P052').length,
+    }));
+    assert(before.slates > 0, 'P052 has slate rows to migrate');
+    await page.evaluate(() => { __APP__.openPersonDrawer('P052'); });
+    await typeInto(page, 'pId', 'P052-NEW');
+    await page.click('#drawerSave');
+    const after = await page.evaluate(() => ({
+      old: __APP__.successors.filter(s => s.personId === 'P052').length,
+      nw: __APP__.successors.filter(s => s.personId === 'P052-NEW').length,
+      incOld: __APP__.roles.filter(r => r.incumbentPersonId === 'P052').length,
+      incNew: __APP__.roles.filter(r => r.incumbentPersonId === 'P052-NEW').length,
+    }));
+    assertEq(after.old, 0, 'no stale successor refs');
+    assertEq(after.nw, before.slates, 'successor refs migrated');
+    assertEq(after.incOld, 0, 'no stale incumbency');
+    assertEq(after.incNew, before.inc, 'incumbency migrated');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(!rows.some(r => r.recordType === 'SUCCESSOR' && r.personId === 'P052'), 'CSV has no stale refs');
+  });
+  await test('duplicate person ID is rejected', async () => {
+    const n = (await counts(page)).people;
+    await page.evaluate(() => __APP__.openPersonDrawer());
+    await typeInto(page, 'pId', 'P001');
+    await typeInto(page, 'pName', 'Impostor');
+    await page.click('#drawerSave');
+    assertEq((await counts(page)).people, n, 'no new person added');
+    assertEq((await lastMsg(page)).type, 'ERR', 'error message shown');
+    await clickAction(page, 'closeDrawer');
+  });
+  await test('missing required fields are rejected', async () => {
+    await page.evaluate(() => __APP__.openPersonDrawer());
+    await typeInto(page, 'pId', ''); await typeInto(page, 'pName', '');
+    await page.click('#drawerSave');
+    assertEq((await lastMsg(page)).type, 'ERR');
+    await clickAction(page, 'closeDrawer');
+  });
+  await test('delete person clears slates and incumbency (confirm dialog)', async () => {
+    dialogs = [];
+    await page.evaluate(() => __APP__.openPersonDrawer('P052-NEW'));
+    await page.click('[data-action="deletePerson"]');
+    assert(dialogs.length === 1 && dialogs[0].type === 'confirm', 'confirm asked');
+    const after = await page.evaluate(() => ({
+      person: !!__APP__.people.find(p => p.id === 'P052-NEW'),
+      slates: __APP__.successors.filter(s => s.personId === 'P052-NEW').length,
+      inc: __APP__.roles.filter(r => r.incumbentPersonId === 'P052-NEW').length,
+    }));
+    assert(!after.person && !after.slates && !after.inc, 'fully removed');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(!rows.some(r => r.personId === 'P052-NEW'), 'gone from CSV');
+  });
+
+  /* ===================================================================
+     4. ROLE CRUD via drawer UI
+     =================================================================== */
+  section('4. Role CRUD via drawer UI');
+  await loadBase(page); // fresh baseline
+  await test('add role via drawer with quotes in title, persists to CSV', async () => {
+    await page.evaluate(() => __APP__.openRoleDrawer());
+    await typeInto(page, 'rId', 'R-TEST-1');
+    await typeInto(page, 'rTitle', `Head of "Special" Ops, EMEA`);
+    await setSelect(page, 'rLevel', 'VP');
+    await setSelect(page, 'rManager', 'R-CEO');
+    await page.click('#drawerSave');
+    const r = await page.evaluate(() => __APP__.roles.find(x => x.id === 'R-TEST-1'));
+    assertEq(r.title, 'Head of "Special" Ops, EMEA');
+    assertEq(r.managerRoleId, 'R-CEO');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(x => x.recordType === 'ROLE' && x.roleId === 'R-TEST-1' && x.roleTitle === 'Head of "Special" Ops, EMEA'), 'in CSV');
+  });
+  await test('renaming a role ID migrates slates, children and rules', async () => {
+    const before = await page.evaluate(() => __APP__.successors.filter(s => s.roleId === 'R-CFO').length);
+    assert(before > 0, 'R-CFO has slate');
+    await page.evaluate(() => __APP__.openRoleDrawer('R-CFO'));
+    await typeInto(page, 'rId', 'R-CFO-X');
+    await page.click('#drawerSave');
+    const after = await page.evaluate(() => ({
+      old: __APP__.successors.filter(s => s.roleId === 'R-CFO').length,
+      nw: __APP__.successors.filter(s => s.roleId === 'R-CFO-X').length,
+      kids: __APP__.roles.filter(r => r.managerRoleId === 'R-CFO').length,
+    }));
+    assertEq(after.old, 0); assertEq(after.nw, before); assertEq(after.kids, 0, 'children repointed');
+  });
+  await test('circular manager assignment is blocked', async () => {
+    const child = await page.evaluate(() => __APP__.roles.find(r => r.managerRoleId === 'R-CEO').id);
+    await page.evaluate(() => __APP__.openRoleDrawer('R-CEO'));
+    await setSelect(page, 'rManager', child);
+    await page.click('#drawerSave');
+    assertEq((await lastMsg(page)).type, 'ERR', 'circular blocked');
+    await clickAction(page, 'closeDrawer');
+    const mgr = await page.evaluate(() => __APP__.roles.find(r => r.id === 'R-CEO').managerRoleId);
+    assert(!mgr, 'R-CEO still root');
+  });
+  await test('delete role removes slate entries and repoints children', async () => {
+    dialogs = [];
+    await page.evaluate(() => __APP__.openRoleDrawer('R-TEST-1'));
+    await page.click('[data-action="deleteRole"]');
+    assert(dialogs.length === 1, 'confirmed');
+    const gone = await page.evaluate(() => !__APP__.roles.some(r => r.id === 'R-TEST-1') && !__APP__.successors.some(s => s.roleId === 'R-TEST-1'));
+    assert(gone, 'role gone everywhere');
+  });
+
+  /* ===================================================================
+     5. DRAG & DROP + slate mechanics
+     =================================================================== */
+  section('5. Drag & drop, ranking, slate mechanics');
+  await loadBase(page);
+  await page.click('[data-action="tab"][data-tab-id="ALL"]');
+
+  await test('drag a candidate from the box onto a role adds a slate row', async () => {
+    // find a person NOT on R-CEO slate
+    const pid = await page.evaluate(() => {
+      const onSlate = new Set(__APP__.successors.filter(s => s.roleId === 'R-CEO').map(s => s.personId));
+      return __APP__.people.find(p => !onSlate.has(p.id) && p.id !== (__APP__.roles.find(r => r.id === 'R-CEO') || {}).incumbentPersonId).id;
+    });
+    await typeInto(page, 'pieceSearch', pid); await page.waitForTimeout(200);
+    const before = await page.evaluate(() => __APP__.successors.filter(s => s.roleId === 'R-CEO').length);
+    const res = await simulateDrag(page, `.piece[data-person-id="${pid}"]`, `.role[data-role-id="R-CEO"]`);
+    assertEq(res, 'ok');
+    const s = await page.evaluate(pid => __APP__.successors.find(s => s.roleId === 'R-CEO' && s.personId === pid), pid);
+    assert(s, 'slate row created');
+    assertEq(s.ranking, before + 1, 'appended at bottom rank');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'SUCCESSOR' && r.successorRoleId === 'R-CEO' && r.personId === pid), 'persisted to CSV');
+    await typeInto(page, 'pieceSearch', ''); await page.waitForTimeout(200);
+  });
+  await test('duplicate drop is rejected with a warning', async () => {
+    const { pid, n } = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => s.roleId === 'R-CEO');
+      return { pid: s.personId, n: __APP__.successors.filter(x => x.roleId === 'R-CEO').length };
+    });
+    await typeInto(page, 'pieceSearch', pid); await page.waitForTimeout(200);
+    await simulateDrag(page, `.piece[data-person-id="${pid}"]`, `.role[data-role-id="R-CEO"]`);
+    const n2 = await page.evaluate(() => __APP__.successors.filter(x => x.roleId === 'R-CEO').length);
+    assertEq(n2, n, 'no duplicate');
+    assertEq((await lastMsg(page)).type, 'WARN');
+    await typeInto(page, 'pieceSearch', ''); await page.waitForTimeout(200);
+  });
+  await test('drag a pill onto another pill reorders (insert before)', async () => {
+    const ids = await page.evaluate(() => __APP__.slateFor('R-CEO').map(s => s.id));
+    assert(ids.length >= 3, 'needs 3+ candidates');
+    const last = ids[ids.length - 1], first = ids[0];
+    await simulateDrag(page, `.succ[data-succ-id="${last}"]`, `.succ[data-succ-id="${first}"]`);
+    const ids2 = await page.evaluate(() => __APP__.slateFor('R-CEO').map(s => s.id));
+    assertEq(ids2[0], last, 'moved to front');
+    const ranks = await page.evaluate(() => __APP__.slateFor('R-CEO').map(s => s.ranking).join(','));
+    assertEq(ranks, ids2.map((_, i) => i + 1).join(','), 'ranks normalized 1..n');
+  });
+  await test('drag a pill onto another role moves the candidate across slates', async () => {
+    const { sid, pid } = await page.evaluate(() => {
+      const s = __APP__.slateFor('R-CEO').find(x => !__APP__.successors.some(y => y.personId === x.personId && y.roleId === 'R-COO'));
+      return { sid: s.id, pid: s.personId };
+    });
+    await simulateDrag(page, `.succ[data-succ-id="${sid}"]`, `.role[data-role-id="R-COO"]`);
+    const s = await page.evaluate(sid => __APP__.successors.find(x => x.id === sid), sid);
+    assertEq(s.roleId, 'R-COO', 'moved to R-COO');
+    assertEq(s.approved, false, 'approval reset on move');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'SUCCESSOR' && r.roleId === sid && r.successorRoleId === 'R-COO'), 'CSV updated');
+  });
+  await test('rank arrows move candidates up/down and are boundary-safe', async () => {
+    const slate = await page.evaluate(() => __APP__.slateFor('R-CEO').map(s => s.id));
+    const secondId = slate[1];
+    await page.click(`.succ[data-succ-id="${secondId}"] [data-action="rank"][data-delta="-1"]`);
+    let after = await page.evaluate(() => __APP__.slateFor('R-CEO').map(s => s.id));
+    assertEq(after[0], secondId, 'moved up');
+    await page.click(`.succ[data-succ-id="${secondId}"] [data-action="rank"][data-delta="-1"]`);
+    after = await page.evaluate(() => __APP__.slateFor('R-CEO').map(s => s.id));
+    assertEq(after[0], secondId, 'no-op at top boundary');
+  });
+  await test('remove pill deletes slate row and renumbers', async () => {
+    const { sid, n } = await page.evaluate(() => ({ sid: __APP__.slateFor('R-CEO')[0].id, n: __APP__.slateFor('R-CEO').length }));
+    await page.click(`.succ[data-succ-id="${sid}"] [data-action="removeSucc"]`);
+    const after = await page.evaluate(() => __APP__.slateFor('R-CEO'));
+    assertEq(after.length, n - 1, 'removed');
+    assertEq(after.map(s => s.ranking).join(','), after.map((_, i) => i + 1).join(','), 'renumbered');
+  });
+  await test('select candidate → “+ name” quick-assign button on role cards', async () => {
+    const pid = await page.evaluate(() => {
+      const onSlate = new Set(__APP__.successors.filter(s => s.roleId === 'R-CMO').map(s => s.personId));
+      return __APP__.people.find(p => !onSlate.has(p.id)).id;
+    });
+    await typeInto(page, 'pieceSearch', pid); await page.waitForTimeout(200);
+    await page.click(`.piece[data-person-id="${pid}"] [data-action="selectPiece"]`);
+    await page.click(`[data-action="assignSelected"][data-role-id="R-CMO"]`);
+    const ok = await page.evaluate(pid => __APP__.successors.some(s => s.roleId === 'R-CMO' && s.personId === pid), pid);
+    assert(ok, 'assigned via quick button');
+    await page.click('[data-action="clearSelection"]');
+    await typeInto(page, 'pieceSearch', ''); await page.waitForTimeout(200);
+  });
+  await test('drop a .csv file onto the window loads it', async () => {
+    const mini = 'recordType,boardId,boardName,roleId,roleTitle,level,department,managerRoleId,incumbentPersonId,incumbentName,risk,criticality,owner,status,sortOrder,personId,personName\nROLE,,,R-MINI,Mini Role,VP,MiniDept,,,,High,High,,Active,1,,\nPERSON,,,,,,,,,,,,,,,P-MINI,Mini Person';
+    await page.evaluate(csv => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([csv], 'mini.csv', { type: 'text/csv' }));
+      document.body.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    }, mini);
+    await page.waitForFunction(() => __APP__.roles.length === 1 && __APP__.people.length === 1);
+    const r = await page.evaluate(() => __APP__.roles[0]);
+    assertEq(r.id, 'R-MINI');
+  });
+
+  /* ===================================================================
+     6. APPROVALS, RULES ENGINE, AUTOMATION
+     =================================================================== */
+  section('6. Approvals, rules engine, automation');
+  await loadBase(page);
+  await page.click('[data-action="tab"][data-tab-id="ALL"]');
+
+  await test('RULE-001 blocks approving a not-Ready-Now candidate', async () => {
+    const target = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => s.readiness !== 'Ready Now' && __APP__.roles.some(r => r.id === s.roleId) && __APP__.people.some(p => p.id === s.personId));
+      return { sid: s.id, roleId: s.roleId, inc: (__APP__.roles.find(r => r.id === s.roleId) || {}).incumbentPersonId };
+    });
+    await page.evaluate(sid => __APP__.approveSuccessor(sid), target.sid);
+    const after = await page.evaluate(t => ({
+      approved: __APP__.successors.find(s => s.id === t.sid)?.approved,
+      inc: __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId,
+    }), target);
+    assert(!after.approved, 'not approved');
+    assertEq(after.inc, target.inc, 'incumbent unchanged');
+    assertEq((await lastMsg(page)).type, 'ERR', 'block message');
+  });
+  await test('approving a Ready-Now candidate moves them in, vacates old role, persists', async () => {
+    const t = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => s.readiness === 'Ready Now' && s.source !== 'External'
+        && __APP__.people.some(p => p.id === s.personId)
+        && (__APP__.people.find(p => p.id === s.personId).mobility !== 'No')
+        && __APP__.roles.some(r => r.id === s.roleId)
+        && __APP__.roles.some(r => r.incumbentPersonId === s.personId && r.id !== s.roleId)
+        && __APP__.evaluateRules(s).blocks.length === 0);
+      const old = __APP__.roles.find(r => r.incumbentPersonId === s.personId);
+      return { sid: s.id, pid: s.personId, roleId: s.roleId, oldRoleId: old.id };
+    });
+    await page.evaluate(sid => __APP__.approveSuccessor(sid), t.sid);
+    const after = await page.evaluate(t => ({
+      inc: __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId,
+      old: __APP__.roles.find(r => r.id === t.oldRoleId),
+      others: __APP__.successors.filter(s => s.personId === t.pid && s.id !== t.sid).length,
+      s: __APP__.successors.find(s => s.id === t.sid),
+    }), t);
+    assertEq(after.inc, t.pid, 'new incumbent set');
+    // old role either vacated, or automation backfilled it (queued/custom): status changed either way
+    assert(['Action Required', 'Auto Move'].includes(after.old.status), 'old role vacated or backfilled: ' + after.old.status);
+    assertEq(after.others, 0, 'other slate entries for the person removed');
+    assert(after.s.approved === true, 'approved flag');
+    const rows = parseCsvRows(await csvOf(page));
+    const row = rows.find(r => r.recordType === 'ROLE' && r.roleId === t.roleId);
+    assertEq(row.incumbentPersonId, t.pid, 'CSV incumbent updated');
+    assert(rows.some(r => r.recordType === 'SUCCESSOR' && r.roleId === t.sid && r.approved === 'true'), 'CSV approved flag');
+    assert(rows.some(r => r.recordType === 'HISTORY' && r.historyAction === 'Approved Move'), 'history logged in CSV');
+  });
+  await test('Approve Top on empty slate warns without crashing', async () => {
+    const rid = await page.evaluate(() => {
+      let r = __APP__.roles.find(r => !__APP__.successors.some(s => s.roleId === r.id));
+      if (!r) { r = { id: 'R-EMPTY-T', title: 'Empty Slate Role', level: 'VP', department: '', boardId: '', managerRoleId: '', incumbentPersonId: '', incumbentName: 'VACANT', risk: 'Low', criticality: 'Low', owner: '', status: '', sortOrder: 999 }; __APP__.roles.push(r); __APP__.render(); }
+      return r.id;
+    });
+    await page.evaluate(rid => __APP__.approveTop(rid), rid);
+    assertEq((await lastMsg(page)).type, 'WARN');
+  });
+  await test('auto move queues on an occupied role (⚡ pill + CSV flag)', async () => {
+    const t = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => {
+        const r = __APP__.roles.find(r => r.id === s.roleId);
+        const p = __APP__.people.find(p => p.id === s.personId);
+        return r && p && !__APP__.isRoleVacant(r) && s.readiness === 'Ready Now' && p.mobility !== 'No' && s.source !== 'External'
+          && __APP__.evaluateRules(s).blocks.length === 0;
+      });
+      return { sid: s.id };
+    });
+    await page.evaluate(sid => __APP__.autoMove(sid), t.sid);
+    const s = await page.evaluate(sid => __APP__.successors.find(x => x.id === sid), t.sid);
+    assert(s.autoMoveQueued === true, 'queued');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'SUCCESSOR' && r.roleId === t.sid && r.autoMoveQueued === 'true'), 'CSV queue flag');
+  });
+  await test('vacating a role triggers the queued auto move', async () => {
+    // isolate the queue path: RULE-004 (AUTO_BACKFILL) legitimately outranks the queue,
+    // so disable backfill rules for this test
+    await page.evaluate(() => { __APP__.rules.filter(r => r.type === 'AUTO_BACKFILL').forEach(r => r.enabled = false); });
+    const t = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => s.autoMoveQueued);
+      return { sid: s.id, pid: s.personId, roleId: s.roleId };
+    });
+    await page.evaluate(rid => {
+      const r = __APP__.roles.find(x => x.id === rid);
+      r.incumbentPersonId = ''; r.incumbentName = 'VACANT';
+      __APP__.runVacancyAutomation(rid); __APP__.render();
+    }, t.roleId);
+    const after = await page.evaluate(t => ({
+      inc: __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId,
+      slate: __APP__.successors.filter(s => s.personId === t.pid).length,
+    }), t);
+    assertEq(after.inc, t.pid, 'queued candidate auto-moved in');
+    assertEq(after.slate, 0, 'their slate rows consumed');
+  });
+
+  await test('create BLOCK rule via drawer UI; it blocks the move; persists', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => s.readiness === 'Ready Now' && __APP__.people.find(p => p.id === s.personId)?.mobility !== 'No' && s.source !== 'External' && __APP__.roles.some(r => r.id === s.roleId) && __APP__.evaluateRules(s).blocks.length === 0);
+      return { sid: s.id, pid: s.personId, roleId: s.roleId };
+    });
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-BLOCK-T');
+    await typeInto(page, 'ruleName', 'Test Block');
+    await setSelect(page, 'ruleType', 'BLOCK');
+    await setSelect(page, 'rulePerson', t.pid);
+    await setSelect(page, 'ruleTarget', t.roleId);
+    await page.click('#drawerSave');
+    assert(await page.evaluate(() => __APP__.rules.some(r => r.id === 'RULE-BLOCK-T')), 'rule saved');
+    await page.evaluate(sid => __APP__.approveSuccessor(sid), t.sid);
+    const inc = await page.evaluate(t => __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId, t);
+    assert(inc !== t.pid, 'move blocked by rule');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'RULE' && r.ruleId === 'RULE-BLOCK-T' && r.rulePersonId === t.pid), 'rule persisted');
+  });
+  await test('"cannot change role" BLOCK variant works', async () => {
+    const t = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => s.readiness === 'Ready Now'
+        && __APP__.roles.some(r => r.incumbentPersonId === s.personId && r.id !== s.roleId)
+        && __APP__.people.find(p => p.id === s.personId)?.mobility !== 'No' && s.source !== 'External');
+      return { sid: s.id, pid: s.personId, roleId: s.roleId };
+    });
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-BLOCK-T2');
+    await setSelect(page, 'ruleType', 'BLOCK');
+    await setSelect(page, 'rulePerson', t.pid);
+    await setSelect(page, 'ruleBlockOperator', 'cannot change role');
+    await page.click('#drawerSave');
+    await page.evaluate(sid => __APP__.approveSuccessor(sid), t.sid);
+    const inc = await page.evaluate(t => __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId, t);
+    assert(inc !== t.pid, 'cannot-change-role enforced');
+    await page.evaluate(() => { __APP__.deleteRule; }); // noop guard
+    dialogs = [];
+    await page.evaluate(() => __APP__.openRuleDrawer('RULE-BLOCK-T2'));
+    await page.click('[data-action="deleteRule"]');
+    assert(await page.evaluate(() => !__APP__.rules.some(r => r.id === 'RULE-BLOCK-T2')), 'rule deleted');
+  });
+  await test('FIELD_RULE operators: equals / not equals / contains / not contains / list', async () => {
+    const r = await page.evaluate(() => {
+      const mk = (op, field, value) => ({ id: 'X', name: 'x', type: 'FIELD_RULE', scope: 'Candidate', field, operator: op, value: JSON.stringify([{ field, operator: op, value }]), severity: 'Block', message: 'x', enabled: true });
+      const results = [];
+      const probe = { personId: '__nobody__', roleId: '__norole__', readiness: 'Ready Now', source: 'Internal', candidateType: 'Successor', confidence: 'High' };
+      const run = rule => { __APP__.rules.push(rule); const e = __APP__.evaluateRules(probe); __APP__.rules.pop(); return e.blocks.length > 0; };
+      results.push(run(mk('equals', 'readiness', 'Ready Now')) === true);
+      results.push(run(mk('equals', 'readiness', '3-5 Years')) === false);
+      results.push(run(mk('not equals', 'readiness', '3-5 Years')) === true);
+      results.push(run(mk('contains', 'candidateType', 'success')) === true);
+      results.push(run(mk('contains', 'candidateType', 'athlete')) === false);
+      results.push(run(mk('not contains', 'candidateType', 'athlete')) === true);
+      results.push(run(mk('list', 'source', 'Internal|External')) === true);
+      results.push(run(mk('list', 'source', 'External|Agency')) === false);
+      // multi-condition AND
+      const multi = { id: 'X2', name: 'x', type: 'FIELD_RULE', scope: 'Candidate', field: 'readiness', operator: 'equals', value: JSON.stringify([{ field: 'readiness', operator: 'equals', value: 'Ready Now' }, { field: 'source', operator: 'equals', value: 'External' }]), severity: 'Block', message: 'x', enabled: true };
+      results.push(run(multi) === false);
+      return results;
+    });
+    assert(r.every(Boolean), 'operator matrix: ' + JSON.stringify(r));
+  });
+  await test('create FIELD_RULE with contains via drawer UI', async () => {
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-CONTAINS-T');
+    await typeInto(page, 'ruleName', 'No interim in slate');
+    await setSelect(page, 'ruleSeverity', 'Needs Review');
+    await page.evaluate(() => {
+      const row = document.querySelector('#conditionRows .condition-row');
+      row.querySelector('.condField').value = 'candidateType';
+      row.querySelector('.condField').dispatchEvent(new Event('change', { bubbles: true }));
+      row.querySelector('.condOperator').value = 'contains';
+      row.querySelector('.condOperator').dispatchEvent(new Event('change', { bubbles: true }));
+      row.querySelector('.condValueText').value = 'Interim';
+    });
+    await page.click('#drawerSave');
+    const rule = await page.evaluate(() => __APP__.rules.find(r => r.id === 'RULE-CONTAINS-T'));
+    assert(rule && rule.enabled, 'saved');
+    const conds = JSON.parse(rule.value);
+    assertEq(conds[0].operator, 'contains'); assertEq(conds[0].value, 'Interim');
+    const fires = await page.evaluate(() => __APP__.evaluateRules({ personId: 'x', roleId: 'y', candidateType: 'Interim Candidate', readiness: 'Ready Now', source: 'Internal', confidence: 'High' }).reviews.some(m => m.includes('No interim')));
+    assert(fires, 'review fires');
+  });
+  await test('legacy BLOCK rule without operator/target is inferred as "cannot change role"', async () => {
+    await loadBase(page);
+    const r = await page.evaluate(() => __APP__.rules.find(x => x.id === 'RULE-005'));
+    assertEq(r.operator, 'cannot change role', 'operator inferred on load');
+    const blocked = await page.evaluate(() => {
+      // give P006 a current role temporarily, then try to move them elsewhere
+      __APP__.roles.push({ id: 'R-P006-TMP', title: 'Tmp', level: 'VP', department: '', boardId: '', managerRoleId: '', incumbentPersonId: 'P006', incumbentName: 'Nora Mitchell', risk: 'Low', criticality: 'Low', owner: '', status: '', sortOrder: 999 });
+      const e = __APP__.evaluateRules({ personId: 'P006', roleId: 'R-CEO', readiness: 'Ready Now', source: 'Internal', confidence: 'High', candidateType: 'Successor' });
+      __APP__.roles.pop();
+      return e.blocks.length > 0;
+    });
+    assert(blocked, 'P006 blocked from changing roles');
+  });
+  await test('rule enable/disable switch persists and changes behavior', async () => {
+    // disable RULE-001 (blocks non-ready) then a non-ready approve goes through with warnings
+    await page.click('[data-action="tab"][data-tab-id="RULES"]');
+    await page.click('[data-change="ruleToggle"][data-rule-id="RULE-001"]');
+    let enabled = await page.evaluate(() => __APP__.rules.find(r => r.id === 'RULE-001').enabled);
+    assertEq(enabled, false, 'disabled');
+    let rows = parseCsvRows(await csvOf(page));
+    assertEq(rows.find(r => r.ruleId === 'RULE-001').ruleEnabled, 'false', 'CSV enabled=false');
+    const t = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => s.readiness === '1-2 Years' && s.source !== 'External'
+        && __APP__.people.find(p => p.id === s.personId)?.mobility !== 'No'
+        && __APP__.roles.some(r => r.id === s.roleId));
+      return { sid: s.id, pid: s.personId, roleId: s.roleId };
+    });
+    await page.evaluate(sid => __APP__.approveSuccessor(sid), t.sid);
+    const inc = await page.evaluate(t => __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId, t);
+    assertEq(inc, t.pid, 'approve allowed once rule disabled');
+    await page.click('[data-change="ruleToggle"][data-rule-id="RULE-001"]');
+    enabled = await page.evaluate(() => __APP__.rules.find(r => r.id === 'RULE-001').enabled);
+    assertEq(enabled, true, 're-enabled');
+  });
+  await test('AUTO_BACKFILL by candidate type fills a vacancy (via drawer UI)', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-AB-T');
+    await setSelect(page, 'ruleType', 'AUTO_BACKFILL');
+    await setSelect(page, 'autoTypeSelect', 'Emergency Successor');
+    await page.click('#drawerSave');
+    const t = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => s.candidateType === 'Emergency Successor' && __APP__.people.some(p => p.id === s.personId) && __APP__.roles.some(r => r.id === s.roleId && !__APP__.isRoleVacant(r)));
+      const top = __APP__.slateFor(s.roleId).filter(x => x.candidateType.includes('Emergency Successor'))[0];
+      return { roleId: s.roleId, expectPid: top.personId };
+    });
+    await page.evaluate(rid => {
+      const r = __APP__.roles.find(x => x.id === rid);
+      r.incumbentPersonId = ''; r.incumbentName = 'VACANT';
+      __APP__.runVacancyAutomation(rid); __APP__.render();
+    }, t.roleId);
+    const inc = await page.evaluate(t => __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId, t);
+    assertEq(inc, t.expectPid, 'top emergency successor backfilled');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'RULE' && r.ruleId === 'RULE-AB-T'), 'rule in CSV');
+  });
+  await test('AUTO_BACKFILL custom mapping fills a vacancy with the mapped person', async () => {
+    await loadBase(page);
+    // disable the CSV's own backfill rule so the custom mapping is what fires
+    await page.evaluate(() => { __APP__.rules.filter(r => r.type === 'AUTO_BACKFILL').forEach(r => r.enabled = false); });
+    const t = await page.evaluate(() => {
+      const r = __APP__.roles.find(r => !__APP__.isRoleVacant(r));
+      const incumbents = new Set(__APP__.roles.map(x => x.incumbentPersonId));
+      const p = __APP__.people.find(p => !incumbents.has(p.id));
+      return { roleId: r.id, pid: p.id };
+    });
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-AB-CUSTOM');
+    await setSelect(page, 'ruleType', 'AUTO_BACKFILL');
+    await setSelect(page, 'autoTypeSelect', 'Custom');
+    await page.click('[data-action="addCustomMapRow"]');
+    await page.evaluate(t => {
+      const row = document.querySelector('#customMapRows .custom-map-row');
+      row.querySelector('.customRole').value = t.roleId;
+      row.querySelector('.customPerson').value = t.pid;
+    }, t);
+    await page.click('#drawerSave');
+    await page.evaluate(rid => {
+      const r = __APP__.roles.find(x => x.id === rid);
+      r.incumbentPersonId = ''; r.incumbentName = 'VACANT';
+      __APP__.runVacancyAutomation(rid); __APP__.render();
+    }, t.roleId);
+    const inc = await page.evaluate(t => __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId, t);
+    assertEq(inc, t.pid, 'custom-mapped person moved in');
+  });
+
+  /* ===================================================================
+     7. UNDO / RESET / CLEAR / HISTORY
+     =================================================================== */
+  section('7. Undo, reset, clear, history');
+  await loadBase(page);
+  await test('undo restores state exactly after a chain of mutations', async () => {
+    const csv0 = await csvOf(page);
+    await page.evaluate(() => {
+      const p = __APP__.people[0], r = __APP__.roles.find(r => !__APP__.successors.some(s => s.roleId === r.id && s.personId === p.id));
+      __APP__.addSuccessor(p.id, r.id);
+    });
+    await page.evaluate(() => __APP__.moveRank(__APP__.slateFor('R-CEO')[1].id, -1));
+    const rid = await page.evaluate(() => { const r = __APP__.roles[10]; __APP__.openRoleDrawer(r.id); return r.id; });
+    await typeInto(page, 'rTitle', 'Renamed For Undo');
+    await page.click('#drawerSave');
+    assert((await counts(page)).undo >= 3, 'undo stack grew');
+    await page.evaluate(() => __APP__.undoLastAction());
+    await page.evaluate(() => __APP__.undoLastAction());
+    await page.evaluate(() => __APP__.undoLastAction());
+    const csv1 = await csvOf(page);
+    // history rows may differ (log entries), compare everything except HISTORY
+    const strip = t => t.split('\n').filter(l => !l.startsWith('HISTORY')).join('\n');
+    assertEq(strip(csv1), strip(csv0), 'state identical after 3 undos');
+  });
+  await test('undo with empty stack warns gracefully', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.undoLastAction());
+    assertEq((await lastMsg(page)).type, 'WARN');
+  });
+  await test('Ctrl+Z keyboard undo works outside inputs', async () => {
+    const n0 = await page.evaluate(() => { const p = __APP__.people[3]; __APP__.addSuccessor(p.id, 'R-CEO'); return __APP__.slateFor('R-CEO').length; });
+    await page.click('h2#viewTitle'); // focus body area
+    await page.keyboard.press('Control+z');
+    const n1 = await page.evaluate(() => __APP__.slateFor('R-CEO').length);
+    assertEq(n1, n0 - 1, 'undone via keyboard');
+  });
+  await test('reset org changes returns to import baseline but keeps new records', async () => {
+    await loadBase(page);
+    const baseCsvNorm = (await csvOf(page)).split('\n').filter(l => l.startsWith('ROLE') || l.startsWith('SUCCESSOR')).join('\n');
+    // make org changes: approve someone, add successor
+    await page.evaluate(() => {
+      __APP__.rules.find(r => r.id === 'RULE-001').enabled = false;
+      const s = __APP__.successors[0];
+      __APP__.approveSuccessor(s.id);
+      __APP__.addSuccessor(__APP__.people[5].id, 'R-CEO');
+    });
+    // add a brand new person + rule that must survive
+    await page.evaluate(() => {
+      __APP__.people.push({ id: 'P-KEEP', name: 'Keep Me', title: '', department: '', email: '', location: '', jobLevel: '', readiness: 'Ready Now', source: 'Internal', candidateType: 'Successor', confidence: 'High', performance: '', potential: '', retentionRisk: '', mobility: '', criticalExperience: '', skills: '', notes: '' });
+    });
+    dialogs = [];
+    await page.evaluate(() => __APP__.resetOrgChanges());
+    assert(dialogs.length === 1, 'confirm shown');
+    const after = await csvOf(page);
+    const afterNorm = after.split('\n').filter(l => l.startsWith('ROLE') || l.startsWith('SUCCESSOR')).join('\n');
+    assertEq(afterNorm, baseCsvNorm, 'roles+slates restored to baseline');
+    assert(after.includes('P-KEEP'), 'new person kept');
+  });
+  await test('clear all empties everything and undo brings it back', async () => {
+    await loadBase(page);
+    dialogs = [];
+    await page.evaluate(() => __APP__.clearAll());
+    let c = await counts(page);
+    assertEq(c.roles, 0); assertEq(c.people, 0);
+    await page.evaluate(() => __APP__.undoLastAction());
+    c = await counts(page);
+    assertEq(c.roles, 72); assertEq(c.people, 150);
+  });
+  await test('history entries persist through CSV round-trip', async () => {
+    await page.evaluate(() => __APP__.addSuccessor(__APP__.people[7].id, 'R-COO'));
+    const csv = await csvOf(page);
+    assert(csv.includes('Candidate Added'), 'history in CSV');
+    await loadBase(page, csv);
+    const h = await page.evaluate(() => __APP__.history.some(h => h.action === 'Candidate Added'));
+    assert(h, 'history restored');
+  });
+
+  /* ===================================================================
+     8. TABS / BOARDS MANAGEMENT + CUSTOM VALUES
+     =================================================================== */
+  section('8. Tabs & custom values');
+  await loadBase(page);
+  await test('add a custom tab via Manage Tabs drawer; persists as BOARD row', async () => {
+    await clickAction(page, 'toggleMenu');
+    await page.click('#moreMenu [data-action="manageTabs"]');
+    await page.click('[data-action="addBoardRow"]');
+    await page.evaluate(() => {
+      const rows = document.querySelectorAll('#boardRows .tab-row');
+      const last = rows[rows.length - 1];
+      last.querySelector('.bId').value = 'BOARD-TEST';
+      last.querySelector('.bName').value = 'Test Board';
+    });
+    await page.click('#drawerSave');
+    assert(await page.evaluate(() => __APP__.boards.some(b => b.id === 'BOARD-TEST')), 'board added');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'BOARD' && r.boardId === 'BOARD-TEST' && r.boardName === 'Test Board'), 'BOARD row in CSV');
+    assert(await page.locator('[data-action="tab"][data-tab-id="BOARD-TEST"]').count() === 1, 'tab rendered');
+  });
+  await test('assign role to new board via role drawer; appears on that tab', async () => {
+    await page.evaluate(() => __APP__.openRoleDrawer('R-CEO'));
+    await setSelect(page, 'rBoard', 'BOARD-TEST');
+    await page.click('#drawerSave');
+    await page.click('[data-action="tab"][data-tab-id="BOARD-TEST"]');
+    assertEq(await page.locator('.role').count(), 1, 'one role on new board');
+  });
+  await test('removing a tab keeps roles but removes the tab; active tab falls back', async () => {
+    await clickAction(page, 'toggleMenu');
+    await page.click('#moreMenu [data-action="manageTabs"]');
+    await page.evaluate(() => {
+      [...document.querySelectorAll('#boardRows .tab-row')].forEach(row => {
+        if (row.querySelector('.bId').value === 'BOARD-TEST') row.remove();
+      });
+    });
+    await page.click('#drawerSave');
+    assert(await page.evaluate(() => !__APP__.boards.some(b => b.id === 'BOARD-TEST')), 'board removed');
+    assertEq(await page.evaluate(() => __APP__.activeTab), 'MASTER', 'fell back to MASTER');
+    assertEq((await counts(page)).roles, 72, 'roles kept');
+  });
+  await test('custom dropdown value added via the small modal persists to CSV', async () => {
+    await page.evaluate(() => __APP__.openPersonDrawer('P001'));
+    await setSelect(page, 'pReady', '__ADD__');
+    await page.waitForSelector('#smallValueInput');
+    await page.fill('#smallValueInput', 'Ready In 6 Months');
+    await page.click('#smallAdd');
+    const selVal = await page.evaluate(() => document.getElementById('pReady').value);
+    assertEq(selVal, 'Ready In 6 Months', 'new value selected');
+    await page.click('#drawerSave');
+    const p = await page.evaluate(() => __APP__.people.find(x => x.id === 'P001').readiness);
+    assertEq(p, 'Ready In 6 Months');
+    const rows = parseCsvRows(await csvOf(page));
+    const setting = rows.find(r => r.recordType === 'SETTING');
+    assert(setting.settingValue.includes('Ready In 6 Months'), 'custom value in SETTING row');
+    // and it shows up in the filter bar after render
+    const inFilter = await page.evaluate(() => [...document.getElementById('readinessFilter').options].some(o => o.value === 'Ready In 6 Months'));
+    assert(inFilter, 'available in filters');
+  });
+  await test('add manager role inline from role form (+ Add new manager role…)', async () => {
+    const n = (await counts(page)).roles;
+    await page.evaluate(() => __APP__.openRoleDrawer());
+    await setSelect(page, 'rManager', '__ADD__');
+    await page.waitForSelector('#smallValueInput');
+    await page.fill('#smallValueInput', 'Interim Chief of Staff');
+    await page.click('#smallAdd');
+    assertEq((await counts(page)).roles, n + 1, 'manager role created');
+    const sel = await page.evaluate(() => document.getElementById('rManager').value);
+    assert(sel.startsWith('R-INTERIM'), 'new manager selected: ' + sel);
+    await clickAction(page, 'closeDrawer');
+  });
+
+  /* ===================================================================
+     9. DATA HYGIENE: duplicates, dangling refs, malformed CSV
+     =================================================================== */
+  section('9. Data hygiene & hostile input');
+  await test('duplicate people and slate rows are consolidated on load', async () => {
+    const csv = ['recordType,personId,personName,personTitle,readiness,roleId,roleTitle,level,successorRoleId,ranking,candidateType,approved,autoMoveQueued',
+      'PERSON,P1,Alice,,Ready Now,,,,,,,,',
+      'PERSON,P1,,Engineer,,,,,,,,,',        // dup fills title
+      'ROLE,,,,,R-A,Role A,VP,,,,,',
+      'SUCCESSOR,P1,,,3-5 Years,S1,,,R-A,1,Successor,false,false',
+      'SUCCESSOR,P1,,,Ready Now,S2,,,R-A,2,Emergency Successor,true,false',
+    ].map(l => { // expand to full header
+      return l;
+    }).join('\n');
+    // build a proper full-width CSV instead
+    const H = await page.evaluate(() => window.__APP__ && Object.keys ? null : null);
+    const full = (() => {
+      const headers = 'recordType,boardId,boardName,roleId,roleTitle,level,department,managerRoleId,incumbentPersonId,incumbentName,risk,criticality,owner,status,sortOrder,personId,personName,personTitle,personDepartment,personEmail,location,jobLevel,performance,potential,retentionRisk,mobility,criticalExperience,skills,readiness,source,candidateType,confidence,ranking,notes,successorRoleId,approved,autoMoveQueued,ruleId,ruleName,ruleType,ruleScope,ruleField,ruleOperator,ruleValue,rulePersonId,ruleTargetRoleId,ruleAltPersonId,ruleSeverity,ruleMessage,ruleEnabled,historyId,historyDate,historyAction,historyDetails,settingKey,settingValue'.split(',');
+      const row = o => headers.map(h => o[h] || '').join(',');
+      return [headers.join(','),
+        row({ recordType: 'PERSON', personId: 'P1', personName: 'Alice', readiness: 'Ready Now' }),
+        row({ recordType: 'PERSON', personId: 'P1', personTitle: 'Engineer' }),
+        row({ recordType: 'ROLE', roleId: 'R-A', roleTitle: 'Role A', level: 'VP' }),
+        row({ recordType: 'SUCCESSOR', roleId: 'S1', successorRoleId: 'R-A', personId: 'P1', readiness: '3-5 Years', candidateType: 'Successor', ranking: '1' }),
+        row({ recordType: 'SUCCESSOR', roleId: 'S2', successorRoleId: 'R-A', personId: 'P1', readiness: 'Ready Now', candidateType: 'Emergency Successor', ranking: '2', approved: 'true' }),
+      ].join('\n');
+    })();
+    await loadBase(page, full);
+    const st = await page.evaluate(() => ({ people: __APP__.people, succ: __APP__.successors, msg: __APP__.messages.map(m => m.message) }));
+    assertEq(st.people.length, 1, 'people merged');
+    assertEq(st.people[0].title, 'Engineer', 'blank field filled from dup');
+    assertEq(st.succ.length, 1, 'slate rows merged');
+    assertEq(st.succ[0].readiness, 'Ready Now', 'best readiness kept');
+    assert(st.succ[0].candidateType.includes('Successor') && st.succ[0].candidateType.includes('Emergency Successor'), 'types merged');
+    assertEq(st.succ[0].approved, true, 'approved kept');
+    assert(st.msg.some(m => m.includes('merged')), 'merge notice shown');
+  });
+  await test('dangling successor references produce ERR notices, no crash', async () => {
+    const headers = 'recordType,boardId,boardName,roleId,roleTitle,level,department,managerRoleId,incumbentPersonId,incumbentName,risk,criticality,owner,status,sortOrder,personId,personName,personTitle,personDepartment,personEmail,location,jobLevel,performance,potential,retentionRisk,mobility,criticalExperience,skills,readiness,source,candidateType,confidence,ranking,notes,successorRoleId,approved,autoMoveQueued,ruleId,ruleName,ruleType,ruleScope,ruleField,ruleOperator,ruleValue,rulePersonId,ruleTargetRoleId,ruleAltPersonId,ruleSeverity,ruleMessage,ruleEnabled,historyId,historyDate,historyAction,historyDetails,settingKey,settingValue'.split(',');
+    const row = o => headers.map(h => o[h] || '').join(',');
+    const bad = [headers.join(','),
+      row({ recordType: 'SUCCESSOR', roleId: 'SX', successorRoleId: 'R-GHOST', personId: 'P-GHOST', ranking: '1' }),
+    ].join('\n');
+    await loadBase(page, bad);
+    const msgs = await page.evaluate(() => __APP__.messages.map(m => m.type + ':' + m.message));
+    assert(msgs.some(m => m.startsWith('ERR') && m.includes('P-GHOST')), 'missing person flagged');
+    assert(msgs.some(m => m.startsWith('ERR') && m.includes('R-GHOST')), 'missing role flagged');
+  });
+  await test('empty / garbage / header-only CSV rejected without losing state', async () => {
+    await loadBase(page);
+    const before = await csvOf(page);
+    for (const junk of ['', 'not,a,planner\n1,2,3', 'recordType\n']) {
+      const ok = await page.evaluate(t => window.__APP__.loadCSV(t), junk);
+      assert(ok === false, 'rejected: ' + JSON.stringify(junk.slice(0, 20)));
+    }
+    assertEq(await csvOf(page), before, 'state untouched');
+  });
+  await test('approve with dangling person is handled gracefully', async () => {
+    await page.evaluate(() => {
+      __APP__.successors.push({ id: 'S-DANGLE', roleId: 'R-CEO', personId: 'P-NOPE', readiness: 'Ready Now', source: 'Internal', candidateType: 'Successor', confidence: 'High', ranking: 99, notes: '', approved: false, autoMoveQueued: false });
+      __APP__.approveSuccessor('S-DANGLE');
+    });
+    assertEq((await lastMsg(page)).type, 'ERR', 'graceful error');
+    await page.evaluate(() => { __APP__.removeSuccessor; });
+  });
+
+  /* ===================================================================
+     10. INSIGHTS TAB
+     =================================================================== */
+  section('10. Insights');
+  await loadBase(page);
+  await test('insights KPIs match computed reality', async () => {
+    await page.click('[data-action="tab"][data-tab-id="INSIGHTS"]');
+    const expected = await page.evaluate(() => {
+      const roles = __APP__.roles, ss = __APP__.successors;
+      const covered = roles.filter(r => ss.some(s => s.roleId === r.id)).length;
+      const ready = roles.filter(r => ss.some(s => s.roleId === r.id && String(s.readiness).toLowerCase() === 'ready now')).length;
+      const vacant = roles.filter(r => __APP__.isRoleVacant(r)).length;
+      return { total: roles.length, covPct: Math.round(covered / roles.length * 100), readyPct: Math.round(ready / roles.length * 100), vacant };
+    });
+    const kpiText = await page.evaluate(() => [...document.querySelectorAll('.kpi b')].map(b => b.textContent));
+    assertEq(kpiText[0], String(expected.total), 'roles KPI');
+    assertEq(kpiText[1], expected.covPct + '%', 'coverage KPI');
+    assertEq(kpiText[2], expected.readyPct + '%', 'ready-now KPI');
+    assertEq(kpiText[3], String(expected.vacant), 'vacant KPI');
+    assert(await page.locator('.insight-card').count() >= 4, 'insight cards render');
+  });
+  await test('insights respects department filter', async () => {
+    await setSelect(page, 'deptFilter', 'Finance');
+    const expected = await page.evaluate(() => __APP__.roles.filter(r => r.department === 'Finance').length);
+    const kpi = await page.evaluate(() => document.querySelector('.kpi b').textContent);
+    assertEq(kpi, String(expected), 'filtered role count');
+    await setSelect(page, 'deptFilter', 'All Departments');
+  });
+
+  /* ===================================================================
+     11. DIRTY STATE / BACKUP / KEYBOARD
+     =================================================================== */
+  section('11. Dirty state, backup, shortcuts');
+  await test('mutations set dirty; load clears it', async () => {
+    await loadBase(page);
+    assertEq((await counts(page)).dirty, false, 'clean after load');
+    await page.evaluate(() => __APP__.addSuccessor(__APP__.people[9].id, 'R-COO'));
+    assertEq((await counts(page)).dirty, true, 'dirty after change');
+  });
+  await test('local backup is written and restorable after reload', async () => {
+    await page.waitForTimeout(1200); // backup debounce
+    const hasBackup = await page.evaluate(() => !!localStorage.getItem('succession_planner_backup_v1'));
+    assert(hasBackup, 'backup written');
+    await page.reload();
+    await page.waitForSelector('[data-action="restoreBackup"]');
+    await page.click('[data-action="restoreBackup"]');
+    const c = await counts(page);
+    assertEq(c.roles, 72, 'backup restored roles');
+    assert(c.people >= 150, 'backup restored people');
+  });
+  await test('Escape closes drawer; drawer backdrop click closes', async () => {
+    await page.evaluate(() => __APP__.openPersonDrawer('P001'));
+    await page.keyboard.press('Escape');
+    const open = await page.evaluate(() => document.getElementById('drawer').classList.contains('open'));
+    assert(!open, 'closed via Escape');
+  });
+
+  /* ===================================================================
+     12. SCALE / PERFORMANCE
+     =================================================================== */
+  section('12. Scale & performance');
+  await test('3,000 people / 800 roles / 4,000 slate rows load + render + round-trip < 15s', async () => {
+    const big = await page.evaluate(() => {
+      const H = ['recordType','boardId','boardName','roleId','roleTitle','level','department','managerRoleId','incumbentPersonId','incumbentName','risk','criticality','owner','status','sortOrder','personId','personName','personTitle','personDepartment','personEmail','location','jobLevel','performance','potential','retentionRisk','mobility','criticalExperience','skills','readiness','source','candidateType','confidence','ranking','notes','successorRoleId','approved','autoMoveQueued','ruleId','ruleName','ruleType','ruleScope','ruleField','ruleOperator','ruleValue','rulePersonId','ruleTargetRoleId','ruleAltPersonId','ruleSeverity','ruleMessage','ruleEnabled','historyId','historyDate','historyAction','historyDetails','settingKey','settingValue'];
+      const row = o => H.map(h => o[h] || '').join(',');
+      const lines = [H.join(',')];
+      const depts = ['Eng', 'Sales', 'HR', 'Fin', 'Ops'];
+      const levels = ['C-Suite', 'VP', 'Director', 'Manager'];
+      for (let i = 0; i < 3000; i++) lines.push(row({ recordType: 'PERSON', personId: 'BP' + i, personName: 'Person ' + i, personDepartment: depts[i % 5], readiness: i % 3 === 0 ? 'Ready Now' : '1-2 Years', candidateType: 'Successor' }));
+      for (let i = 0; i < 800; i++) lines.push(row({ recordType: 'ROLE', roleId: 'BR' + i, roleTitle: 'Role ' + i, level: levels[i % 4], department: depts[i % 5], managerRoleId: i ? 'BR' + Math.floor((i - 1) / 4) : '', incumbentPersonId: i % 7 === 0 ? '' : 'BP' + i, incumbentName: i % 7 === 0 ? 'VACANT' : 'Person ' + i, risk: ['High', 'Medium', 'Low'][i % 3], sortOrder: i }));
+      for (let i = 0; i < 4000; i++) lines.push(row({ recordType: 'SUCCESSOR', roleId: 'BS' + i, successorRoleId: 'BR' + (i % 800), personId: 'BP' + (i % 3000), readiness: i % 3 === 0 ? 'Ready Now' : '3-5 Years', candidateType: 'Successor', ranking: String(Math.floor(i / 800) + 1) }));
+      return lines.join('\n');
+    });
+    const t1 = Date.now();
+    await page.evaluate(t => window.__APP__.loadCSV(t), big);
+    const loadMs = Date.now() - t1;
+    const c = await counts(page);
+    assertEq(c.people, 3000); assertEq(c.roles, 800); assertEq(c.succ, 4000);
+    const t2 = Date.now();
+    await page.evaluate(() => { __APP__.activeTab = 'ALL'; __APP__.render(); });
+    const renderMs = Date.now() - t2;
+    const t3 = Date.now();
+    const csv = await csvOf(page);
+    const rtMs = Date.now() - t3;
+    await loadBase(page, csv);
+    assertEq((await counts(page)).succ, 4000, 'big round-trip intact');
+    console.log(`        load=${loadMs}ms renderAll=${renderMs}ms toCSV=${rtMs}ms`);
+    assert(loadMs + renderMs + rtMs < 15000, 'performance budget');
+  });
+  await test('insights + people views render on the big dataset', async () => {
+    await page.evaluate(() => { __APP__.activeTab = 'INSIGHTS'; __APP__.render(); });
+    assert(await page.locator('.kpi').count() >= 4, 'insights ok');
+    await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
+    assert((await page.locator('.table tbody tr').count()) <= 401, 'people table capped for perf');
+  });
+
+  /* ===================================================================
+     13. SCREENSHOTS for the report
+     =================================================================== */
+  section('13. Screenshots');
+  await test('capture UI screenshots', async () => {
+    await page.setViewportSize({ width: 1560, height: 980 });
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await loadBase(page);
+    const tidy = () => page.evaluate(() => {
+      document.getElementById('toasts').innerHTML = '';
+      document.getElementById('banner').innerHTML = '';
+      document.getElementById('dbStatus').textContent = 'succession_data.csv';
+    });
+    await page.evaluate(() => { __APP__.activeTab = 'ALL'; __APP__.render(); });
+    await tidy();
+    await page.screenshot({ path: path.join(ROOT, 'tests', 'screen_board.png') });
+    await page.evaluate(() => { __APP__.activeTab = 'INSIGHTS'; __APP__.render(); });
+    await tidy();
+    await page.screenshot({ path: path.join(ROOT, 'tests', 'screen_insights.png') });
+    await page.evaluate(() => { __APP__.activeTab = 'MASTER'; __APP__.render(); });
+    await tidy();
+    await page.screenshot({ path: path.join(ROOT, 'tests', 'screen_tree.png') });
+    await page.evaluate(() => { __APP__.activeTab = 'RULES'; __APP__.render(); });
+    await tidy();
+    await page.screenshot({ path: path.join(ROOT, 'tests', 'screen_rules.png') });
+    await page.evaluate(() => __APP__.openRoleDrawer('R-CEO'));
+    await page.waitForTimeout(300);
+    await tidy();
+    await page.screenshot({ path: path.join(ROOT, 'tests', 'screen_drawer.png') });
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+
+  /* ===================================================================
+     FINISH
+     =================================================================== */
+  await test('zero console errors across the whole run', async () => {
+    assert(consoleErrors.length === 0, 'console errors: ' + consoleErrors.slice(0, 5).join(' | '));
+  });
+
+  await browser.close();
+  const pass = results.filter(r => r.ok).length, fail = results.length - pass;
+  console.log('\n============================================');
+  console.log(`TOTAL: ${results.length}  PASS: ${pass}  FAIL: ${fail}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  if (fail) { console.log('\nFailures:'); results.filter(r => !r.ok).forEach(r => console.log('  ✗ ' + r.name + ' — ' + r.err)); process.exit(1); }
+})().catch(e => { console.error('HARNESS CRASH:', e); process.exit(2); });

@@ -1,0 +1,1710 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Succession Planner</title>
+<style>
+:root{
+  --bg:#f4f6f9; --surface:#ffffff; --ink:#1a2433; --muted:#5c6b80; --faint:#8b98ab;
+  --line:#dfe5ed; --line2:#eef1f6;
+  --primary:#0b66c2; --primary-700:#0a539c; --primary-50:#eef5fc; --primary-100:#d8e8f8;
+  --green:#1a7f4b; --green-bg:#e8f5ee; --green-line:#bfe3cf;
+  --red:#c0392b; --red-bg:#fdecea; --red-line:#f3c1bb;
+  --amber:#9a6700; --amber-bg:#fff6e0; --amber-line:#f0dfae;
+  --blue-bg:#e8f1fb; --gray-bg:#eef1f5;
+  --shadow:0 1px 2px rgba(26,36,51,.06),0 4px 14px rgba(26,36,51,.06);
+  --shadow-lg:0 8px 30px rgba(26,36,51,.16);
+  --radius:10px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+h1,h2,h3{margin:0;font-weight:650}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+input,select,textarea{width:100%;font:inherit;color:var(--ink);background:var(--surface);border:1px solid #c9d3e0;border-radius:8px;padding:8px 10px}
+input:focus,select:focus,textarea:focus{outline:2px solid rgba(11,102,194,.30);outline-offset:0;border-color:var(--primary)}
+textarea{min-height:70px;resize:vertical}
+label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;gap:6px;border-radius:8px;padding:8px 13px;font-size:13px;font-weight:600;border:1px solid transparent;white-space:nowrap}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-700)}
+.btn-green{background:var(--green);color:#fff}
+.btn-green:hover{background:#14643b}
+.btn-quiet{background:var(--surface);color:var(--ink);border-color:#c9d3e0}
+.btn-quiet:hover{background:var(--line2)}
+.btn-danger{background:var(--surface);color:var(--red);border-color:var(--red-line)}
+.btn-danger:hover{background:var(--red-bg)}
+.btn-sm{padding:5px 9px;font-size:12px;border-radius:7px}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;color:var(--muted);font-size:12px;line-height:1;border:1px solid transparent}
+.icon-btn:hover{background:var(--line2);color:var(--ink);border-color:var(--line)}
+.icon-btn.ok:hover{background:var(--green-bg);color:var(--green)}
+.icon-btn.warn:hover{background:var(--amber-bg);color:var(--amber)}
+.icon-btn.bad:hover{background:var(--red-bg);color:var(--red)}
+
+/* ---------- app bar ---------- */
+.appbar{position:sticky;top:0;z-index:60;background:var(--surface);border-bottom:1px solid var(--line);box-shadow:0 1px 3px rgba(26,36,51,.05)}
+.appbar-row{display:flex;align-items:center;gap:16px;padding:10px 20px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand-mark{width:34px;height:34px;border-radius:9px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;letter-spacing:.02em;flex:none}
+.brand-name{font-size:15px;font-weight:700;line-height:1.2}
+.brand-sub{font-size:11px;color:var(--muted)}
+.file-status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);min-width:0;flex:1;justify-content:center}
+.file-chip{display:inline-flex;align-items:center;gap:6px;background:var(--line2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dirty-dot{width:8px;height:8px;border-radius:50%;background:var(--amber);display:none;flex:none}
+.dirty .dirty-dot{display:inline-block}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.menu-wrap{position:relative}
+.menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);min-width:210px;padding:6px;display:none;z-index:80}
+.menu.open{display:block}
+.menu button{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:7px;font-size:13px}
+.menu button:hover{background:var(--line2)}
+.menu .sep{height:1px;background:var(--line2);margin:5px 4px}
+.menu .danger{color:var(--red)}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:2px;align-items:flex-end;padding:0 14px;overflow-x:auto;scrollbar-width:thin}
+.tab{position:relative;padding:10px 13px;font-size:13px;font-weight:600;color:var(--muted);border-radius:8px 8px 0 0;white-space:nowrap;border-bottom:3px solid transparent}
+.tab:hover{color:var(--ink);background:var(--line2)}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.tab .count{font-weight:500;color:var(--faint);margin-left:4px;font-size:11px}
+.tab-add{color:var(--faint);font-weight:700;padding:10px 11px}
+.tab-add:hover{color:var(--primary)}
+
+/* ---------- filters ---------- */
+.filters{display:grid;grid-template-columns:minmax(220px,2.2fr) repeat(4,minmax(120px,1fr));gap:8px;padding:10px 20px;background:#fafbfd;border-top:1px solid var(--line2)}
+.filters select,.filters input{padding:7px 10px;font-size:12.5px}
+.search-wrap{position:relative}
+.search-wrap svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--faint)}
+.search-wrap input{padding-left:30px}
+
+/* ---------- layout ---------- */
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;padding:18px 20px;align-items:start}
+.main-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
+.main-title h2{font-size:18px}
+.hint{color:var(--muted);font-size:12px;margin-top:2px}
+.view-actions{display:flex;gap:8px;flex:none}
+
+/* ---------- banner / notices ---------- */
+.banner{margin:12px 20px -4px;background:var(--amber-bg);border:1px solid var(--amber-line);color:#6b4a00;border-radius:var(--radius);padding:10px 14px;display:flex;align-items:center;gap:12px;font-size:12.5px}
+.banner .btn{flex:none}
+.notice{border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:12.5px;display:flex;gap:8px;align-items:baseline}
+.notice b{flex:none}
+.notice.warn{background:var(--amber-bg);border:1px solid var(--amber-line);color:#6b4a00}
+.notice.err{background:var(--red-bg);border:1px solid var(--red-line);color:#7c231a}
+.notice.ok{background:var(--green-bg);border:1px solid var(--green-line);color:#125c38}
+
+/* ---------- side ---------- */
+.side{position:sticky;top:170px;max-height:calc(100vh - 190px);overflow:auto;display:flex;flex-direction:column;gap:12px;padding-bottom:8px;scrollbar-width:thin}
+.side-block{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px}
+.side-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:9px 10px;text-align:left}
+.stat b{display:block;font-size:19px;font-weight:700;line-height:1.15}
+.stat span{font-size:10.5px;color:var(--muted);font-weight:600}
+.piecebox{display:flex;flex-direction:column;gap:7px;max-height:380px;overflow:auto;scrollbar-width:thin}
+.piece{border:1px solid var(--line);border-radius:9px;padding:9px 10px;cursor:grab;background:var(--surface);display:flex;gap:9px;align-items:flex-start}
+.piece:hover{border-color:var(--primary);box-shadow:var(--shadow)}
+.piece.selected{border-color:var(--primary);background:var(--primary-50)}
+.piece-name{font-size:12.5px;font-weight:650}
+.piece-meta{font-size:11px;color:var(--muted);line-height:1.4}
+.piece-actions{margin-top:5px;display:flex;gap:6px}
+.selected-banner{background:var(--primary-50);border:1px solid var(--primary-100);color:var(--primary-700);border-radius:8px;padding:7px 10px;font-size:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:9px 10px;margin-bottom:7px;font-size:12px}
+.panel:last-child{margin-bottom:0}
+
+/* ---------- avatars & badges ---------- */
+.avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-weight:700;flex:none;user-select:none}
+.badge{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 8px;font-size:10.5px;font-weight:650;white-space:nowrap;border:1px solid transparent}
+.badge.green{background:var(--green-bg);color:var(--green);border-color:var(--green-line)}
+.badge.blue{background:var(--blue-bg);color:var(--primary-700);border-color:var(--primary-100)}
+.badge.amber{background:var(--amber-bg);color:var(--amber);border-color:var(--amber-line)}
+.badge.red{background:var(--red-bg);color:var(--red);border-color:var(--red-line)}
+.badge.gray{background:var(--gray-bg);color:var(--muted);border-color:var(--line)}
+.chip{display:inline-block;background:var(--line2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:10.5px;font-weight:600;color:var(--muted);white-space:nowrap}
+
+/* ---------- board ---------- */
+.level{margin-bottom:18px}
+.level-head{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px;padding:0 2px}
+.lane{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:12px;border:1px dashed #c4cede;border-radius:12px;padding:10px;min-height:60px;background:rgba(255,255,255,.4)}
+.role{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--faint);border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;gap:8px}
+.role:hover{box-shadow:var(--shadow)}
+.role.risk-high,.role.risk-critical{border-left-color:var(--red)}
+.role.risk-medium{border-left-color:var(--amber)}
+.role.risk-low{border-left-color:var(--green)}
+.role.dragover{outline:2px solid var(--primary);outline-offset:1px}
+.role-top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.role-name{font-size:13.5px;font-weight:700;line-height:1.3}
+.role-meta{font-size:11px;color:var(--muted);margin-top:2px}
+.incumbent{display:flex;align-items:center;gap:8px;font-size:12px;border:1px solid var(--line2);background:#fafbfd;border-radius:8px;padding:6px 8px}
+.incumbent .who b{display:block;font-size:12px;font-weight:650;line-height:1.25}
+.incumbent .who span{font-size:10.5px;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.succ-list{display:flex;flex-direction:column;gap:5px}
+.succ{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:8px;background:#fafbfd;padding:5px 7px;font-size:11.5px;cursor:grab}
+.succ:hover{border-color:var(--primary)}
+.succ.approved{border-color:var(--green-line);background:var(--green-bg)}
+.succ.autoqueued{border-color:var(--amber-line);background:var(--amber-bg)}
+.succ.dragover{outline:2px solid var(--primary)}
+.succ .rank{flex:none;width:17px;height:17px;border-radius:50%;background:var(--line2);color:var(--muted);font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.succ.approved .rank{background:var(--green);color:#fff}
+.succ.autoqueued .rank{background:var(--amber);color:#fff}
+.succ-main{flex:1;min-width:0;line-height:1.3}
+.succ-main .nm{font-weight:650;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.succ-main .sub{color:var(--muted);font-size:10.5px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.succ-btns{display:flex;gap:2px;flex:none}
+.drop-hint{border:1px dashed var(--line);border-radius:8px;color:var(--faint);font-size:11px;padding:8px;text-align:center}
+.role-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
+
+/* ---------- org tree ---------- */
+.tree{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:24px;min-height:300px;overflow:auto;display:flex;justify-content:flex-start;text-align:center}
+.tree-item{display:flex;flex-direction:column;align-items:center}
+.node{min-width:170px;max-width:230px;border:1px solid var(--line);border-top:3px solid var(--primary);border-radius:9px;background:var(--surface);margin:7px;padding:9px 11px;box-shadow:var(--shadow);cursor:pointer;text-align:left}
+.node:hover{border-color:var(--primary)}
+.node b{font-size:12.5px;display:block;line-height:1.3}
+.node .nsub{font-size:11px;color:var(--muted);margin-top:2px}
+.node .nvac{color:var(--red);font-weight:650}
+.children{display:flex;justify-content:center;gap:8px;position:relative;padding-top:20px}
+.children:before{content:"";position:absolute;top:8px;left:12%;right:12%;border-top:1px solid var(--line)}
+
+/* ---------- tables ---------- */
+.tablebox{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:auto}
+.table{width:100%;border-collapse:collapse;font-size:12.5px}
+.table th{position:sticky;top:0;background:#fafbfd;text-align:left;color:var(--muted);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap;z-index:1}
+.table td{padding:8px 12px;border-bottom:1px solid var(--line2);vertical-align:middle}
+.table tbody tr:hover{background:#f6f9fd}
+.table tbody tr:last-child td{border-bottom:0}
+.row-click{cursor:pointer}
+.tfoot-note{padding:8px 12px;color:var(--faint);font-size:11.5px}
+
+/* ---------- insights ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+.kpi b{display:block;font-size:24px;font-weight:700;line-height:1.2}
+.kpi small{display:block;font-size:11px;color:var(--muted);font-weight:600;margin-top:2px}
+.kpi .sub{font-size:10.5px;color:var(--faint);margin-top:3px}
+.insight-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.insight-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.insight-card h3{font-size:13px;margin-bottom:10px}
+.barrow{display:grid;grid-template-columns:minmax(90px,150px) 1fr 52px;gap:8px;align-items:center;margin-bottom:7px;font-size:12px}
+.barrow .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.barrow .val{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:11.5px}
+.track{display:block;height:8px;border-radius:4px;background:var(--line2);overflow:hidden}
+.fill{display:block;height:100%;border-radius:4px;background:var(--primary);min-width:2px}
+.fill.dim{background:var(--primary-100)}
+.full-card{grid-column:1/-1}
+
+/* ---------- rules ---------- */
+.rule-summary{color:var(--muted);font-size:11.5px;max-width:420px}
+.switch{appearance:none;width:34px;height:19px;border-radius:999px;background:#c9d3e0;position:relative;cursor:pointer;flex:none;transition:background .15s;border:0;padding:0}
+.switch:after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;transition:left .15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.switch:checked{background:var(--green)}
+.switch:checked:after{left:17px}
+.rule-section{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:13px;margin:12px 0}
+.rule-section h3{font-size:13px;margin-bottom:8px}
+.condition-row,.custom-map-row{display:grid;grid-template-columns:1fr 1fr 1.3fr auto;gap:8px;align-items:end;background:#fafbfd;border:1px solid var(--line);border-radius:9px;padding:9px;margin-bottom:8px}
+.tab-row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;background:#fafbfd;border:1px solid var(--line);border-radius:9px;padding:9px;margin-bottom:8px}
+.value-picker{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px;max-height:160px;overflow:auto}
+.value-picker label{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink);font-weight:500;margin:3px 0;text-transform:none;letter-spacing:0}
+.value-picker input{width:auto}
+.value-picker .select-all{border-bottom:1px solid var(--line2);padding-bottom:6px;margin-bottom:6px;font-weight:700}
+
+/* ---------- drawer ---------- */
+.drawer-backdrop{display:none;position:fixed;inset:0;background:rgba(20,28,40,.5);z-index:100}
+.drawer-backdrop.open{display:block}
+.drawer{position:fixed;right:0;top:0;width:min(900px,100vw);height:100vh;background:#f8fafc;box-shadow:var(--shadow-lg);transform:translateX(100%);transition:transform .18s ease;display:flex;flex-direction:column}
+.drawer-backdrop.open .drawer{transform:translateX(0)}
+.drawer-head{background:var(--surface);border-bottom:1px solid var(--line);padding:16px 22px;flex:none}
+.drawer-head h2{font-size:17px}
+.drawer-head .sub{color:var(--muted);font-size:12px;margin-top:3px}
+.drawer-body{padding:18px 22px;overflow:auto;flex:1}
+.drawer-actions{display:flex;justify-content:space-between;gap:10px;background:var(--surface);border-top:1px solid var(--line);padding:12px 22px;flex:none}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.full{grid-column:1/-1}
+.form-note{background:var(--primary-50);border:1px solid var(--primary-100);color:var(--primary-700);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:14px}
+.choice-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.choice-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+.choice-card h3{font-size:14.5px;margin-bottom:6px}
+.drawer-section-title{font-size:13px;font-weight:700;margin:18px 0 8px}
+
+/* ---------- empty state ---------- */
+.empty{background:var(--surface);border:1px dashed #c4cede;border-radius:var(--radius);padding:34px 20px;text-align:center;color:var(--muted);font-size:12.5px}
+.empty .big{font-size:15px;font-weight:650;color:var(--ink);margin-bottom:4px}
+.empty .btn{margin-top:12px}
+
+/* ---------- toasts & modal ---------- */
+#toasts{position:fixed;bottom:14px;right:14px;z-index:300;display:flex;flex-direction:column;gap:8px;width:min(360px,calc(100vw - 28px))}
+.toast{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:9px;box-shadow:var(--shadow-lg);padding:10px 12px;font-size:12.5px;display:flex;gap:9px;align-items:flex-start;animation:toast-in .16s ease}
+.toast.ok{border-left-color:var(--green)}
+.toast.warn{border-left-color:var(--amber)}
+.toast.err{border-left-color:var(--red)}
+.toast .t-close{margin-left:auto;flex:none}
+@keyframes toast-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.modal-backdrop{position:fixed;inset:0;background:rgba(20,28,40,.42);z-index:250;display:flex;align-items:center;justify-content:center}
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow-lg);width:min(420px,92vw);padding:18px}
+.modal h3{font-size:15px;margin-bottom:6px}
+
+.hidden{display:none!important}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#c4cede;border-radius:5px;border:2px solid transparent;background-clip:content-box}
+
+@media(max-width:1250px){.layout{grid-template-columns:1fr}.side{position:static;max-height:none}}
+@media(max-width:900px){
+  .appbar-row{flex-wrap:wrap}.file-status{order:3;flex-basis:100%;justify-content:flex-start}
+  .filters{grid-template-columns:1fr 1fr}.grid,.insight-grid,.choice-grid{grid-template-columns:1fr}
+  .condition-row,.custom-map-row,.tab-row{grid-template-columns:1fr}
+}
+@media print{.appbar,.side,.drawer-backdrop,#toasts{display:none!important}.layout{grid-template-columns:1fr;padding:0}}
+</style>
+</head>
+<body>
+<header class="appbar">
+  <div class="appbar-row">
+    <div class="brand">
+      <div class="brand-mark">SP</div>
+      <div><div class="brand-name">Succession Planner</div><div class="brand-sub">Talent Acquisition · HR</div></div>
+    </div>
+    <div class="file-status" id="fileStatus">
+      <span class="file-chip" id="dbStatus">No CSV loaded</span>
+      <span class="dirty-dot" title="Unsaved changes"></span>
+      <span id="saveStatus">Ready</span>
+    </div>
+    <div class="toolbar">
+      <button class="btn btn-quiet" data-action="openCSV">Open CSV</button>
+      <button class="btn btn-primary" data-action="saveCSV" title="Save to the opened CSV file (Ctrl+S)">Save</button>
+      <button class="btn btn-quiet" data-action="exportCSV" title="Download a copy of the CSV database">Export</button>
+      <button class="btn btn-green" data-action="addChooser">+ Add</button>
+      <button class="btn btn-quiet" data-action="undo" title="Undo last change (Ctrl+Z)">Undo</button>
+      <div class="menu-wrap">
+        <button class="btn btn-quiet" data-action="toggleMenu" title="More actions">&#8943;</button>
+        <div class="menu" id="moreMenu">
+          <button data-action="manageTabs">Manage tabs&hellip;</button>
+          <div class="sep"></div>
+          <button data-action="resetOrg">Reset org changes to import</button>
+          <button class="danger" data-action="clearAll">Clear all data&hellip;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs"></nav>
+  <section class="filters" id="filters">
+    <div class="search-wrap">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search" data-input="render" placeholder="Search roles, people, IDs, departments&hellip;">
+    </div>
+    <select id="levelFilter" data-change="filter"><option>All Levels</option></select>
+    <select id="deptFilter" data-change="filter"><option>All Departments</option></select>
+    <select id="riskFilter" data-change="filter"><option>All Risks</option></select>
+    <select id="readinessFilter" data-change="filter"><option>All Readiness</option></select>
+  </section>
+</header>
+<div id="banner"></div>
+<main class="layout">
+  <section class="main">
+    <div class="main-title">
+      <div><h2 id="viewTitle">Board</h2><div class="hint" id="viewHint"></div></div>
+      <div class="view-actions" id="viewActions"></div>
+    </div>
+    <div id="notices"></div>
+    <div id="mainView"></div>
+  </section>
+  <aside class="side">
+    <div class="stats" id="stats"></div>
+    <div class="side-block">
+      <div class="side-title">Candidate Box</div>
+      <div class="hint" style="margin-bottom:8px">Drag a candidate onto a role, or click to open the profile.</div>
+      <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:7px;margin-bottom:9px">
+        <input id="pieceSearch" data-input="pieceBox" placeholder="Search candidates&hellip;">
+        <select id="pieceDept" data-change="pieceFilter"><option>All Departments</option></select>
+      </div>
+      <div id="pieceBox" class="piecebox"></div>
+    </div>
+    <div class="side-block">
+      <div class="side-title">Approved Moves</div>
+      <div id="approvedPanel"></div>
+    </div>
+    <div class="side-block">
+      <div class="side-title">Recent Messages</div>
+      <div id="messagesPanel"></div>
+    </div>
+  </aside>
+</main>
+<div class="drawer-backdrop" id="drawer">
+  <aside class="drawer" role="dialog" aria-modal="true">
+    <div class="drawer-head">
+      <h2 id="drawerTitle">Drawer</h2>
+      <div class="sub" id="drawerSub"></div>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+    <div class="drawer-actions">
+      <div id="drawerLeft" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-quiet" id="backBtn" style="display:none" data-action="goBack">Back</button>
+        <button class="btn btn-quiet" data-action="closeDrawer">Close</button>
+        <button class="btn btn-primary" id="drawerSave">Save</button>
+      </div>
+    </div>
+  </aside>
+</div>
+<div id="toasts"></div>
+<script>
+'use strict';
+/* =====================================================================
+   Succession Planner — single-file app, CSV file is the database.
+   Data model & CSV format are identical to the v26 planner:
+   record types BOARD, PERSON, ROLE, SUCCESSOR, RULE, HISTORY, SETTING
+   ===================================================================== */
+const CSV_HEADERS=['recordType','boardId','boardName','roleId','roleTitle','level','department','managerRoleId','incumbentPersonId','incumbentName','risk','criticality','owner','status','sortOrder','personId','personName','personTitle','personDepartment','personEmail','location','jobLevel','performance','potential','retentionRisk','mobility','criticalExperience','skills','readiness','source','candidateType','confidence','ranking','notes','successorRoleId','approved','autoMoveQueued','ruleId','ruleName','ruleType','ruleScope','ruleField','ruleOperator','ruleValue','rulePersonId','ruleTargetRoleId','ruleAltPersonId','ruleSeverity','ruleMessage','ruleEnabled','historyId','historyDate','historyAction','historyDetails','settingKey','settingValue'];
+const SYSTEM_BOARDS=['MASTER','ALL','PEOPLE','INSIGHTS','RULES','HISTORY'];
+const SYSTEM_TABS=[{id:'MASTER',name:'Org Tree'},{id:'ALL',name:'All Roles'},{id:'PEOPLE',name:'Candidates'},{id:'INSIGHTS',name:'Insights'},{id:'RULES',name:'Rules'},{id:'HISTORY',name:'History'}];
+const DEFAULT_LEVELS=['CEO','C-Suite','EVP','SVP','VP','Sr Director','Director','Senior Manager','Manager','Individual Contributor'];
+const CANDIDATE_FIELDS=['readiness','source','candidateType','confidence','location','jobLevel','performance','potential','retentionRisk','mobility','criticalExperience','skills','department'];
+const TEXT_OPERATORS=['contains','not contains'];
+const BACKUP_KEY='succession_planner_backup_v1';
+const LIST_CAP=400;   // max table rows rendered at once
+const PIECE_CAP=200;  // max candidate cards rendered at once
+
+let boards=systemBoards(),roles=[],people=[],successors=[],rules=[],history=[],messages=[];
+let fileHandle=null,selectedPersonId='',backRoleId='',undoStack=[],importBaseline=null,currentDrawerPersonId='',customFieldValues={};
+let activeTab='MASTER',dirty=false,backupTimer=null,automationDepth=0;
+
+function systemBoards(){return SYSTEM_TABS.map(t=>({id:t.id,name:t.name}))}
+function uid(p){return p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)}
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function attr(v){return esc(v).replaceAll('`','&#096;')}
+function norm(v){return String(v??'').trim().toLowerCase()}
+function v(id){const el=document.getElementById(id);return el?el.value:''}
+function el(id){return document.getElementById(id)}
+function person(id){return people.find(p=>p.id===id)}
+function role(id){return roles.find(r=>r.id===id)}
+function personName(id,f='VACANT'){const p=person(id);return p?p.name:(f||'VACANT')}
+function deepClone(x){return JSON.parse(JSON.stringify(x))}
+function plur(n,w){return n+' '+w+(n===1?'':'s')}
+function pct(a,b){return b?Math.round(a/b*100):0}
+function fmtDate(iso){const d=new Date(iso);return isNaN(d)?String(iso||''):d.toLocaleString([],{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+
+/* ---------- avatars & badges ---------- */
+function hashCode(s){let h=0;for(let i=0;i<String(s).length;i++){h=(h*31+String(s).charCodeAt(i))|0}return Math.abs(h)}
+function initials(name){const parts=String(name||'?').trim().split(/\s+/);return ((parts[0]||'')[0]||'?').toUpperCase()+((parts.length>1?parts[parts.length-1][0]:'')||'').toUpperCase()}
+function avatarHtml(name,size=26){const hue=hashCode(name||'')%360;return `<span class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size*.38)}px;background:hsl(${hue},42%,88%);color:hsl(${hue},45%,30%)">${esc(initials(name))}</span>`}
+function readinessBadge(val){const s=readinessScore(val);const cls=s===1?'green':s===2?'blue':s===3?'amber':'gray';return `<span class="badge ${cls}">${esc(val||'—')}</span>`}
+function riskBadge(val){const n=norm(val);const cls=(n==='high'||n==='critical')?'red':n==='medium'?'amber':n==='low'?'green':'gray';return `<span class="badge ${cls}">${esc(val||'—')} risk</span>`}
+function statusToast(type){return type==='ERR'?'err':type==='OK'?'ok':'warn'}
+
+/* ---------- status, log, notices, toasts ---------- */
+function setStatus(t){el('saveStatus').textContent=t}
+function log(action,details){if(history[0]&&history[0].action===action&&history[0].details===details)return;history.unshift({id:uid('H'),date:new Date().toISOString(),action,details})}
+function notice(type,msg){
+  if(!(messages[0]&&messages[0].type===type&&messages[0].message===msg)){
+    messages.unshift({id:uid(type),type,message:msg});
+    spawnToast(type,msg);
+  }
+  renderMessages();
+}
+function spawnToast(type,msg){
+  const box=el('toasts');if(!box)return;
+  while(box.children.length>=4)box.firstChild.remove();
+  const t=document.createElement('div');
+  t.className='toast '+statusToast(type);
+  t.innerHTML=`<div>${esc(msg)}</div><button class="icon-btn t-close" title="Dismiss">&#10005;</button>`;
+  t.querySelector('.t-close').onclick=()=>t.remove();
+  box.appendChild(t);
+  setTimeout(()=>{if(t.parentNode)t.remove()},4600);
+}
+
+/* ---------- dirty tracking & local backup ---------- */
+function markDirty(){
+  dirty=true;
+  el('fileStatus').classList.add('dirty');
+  setStatus('Unsaved changes');
+  clearTimeout(backupTimer);
+  backupTimer=setTimeout(()=>{try{localStorage.setItem(BACKUP_KEY,JSON.stringify({ts:Date.now(),csv:toCSV()}))}catch(e){}},900);
+}
+function markClean(msg){
+  dirty=false;
+  el('fileStatus').classList.remove('dirty');
+  if(msg)setStatus(msg);
+}
+function checkBackup(){
+  let b=null;try{b=JSON.parse(localStorage.getItem(BACKUP_KEY)||'null')}catch(e){}
+  if(!b||!b.csv)return;
+  el('banner').innerHTML=`<div class="banner"><span>A local backup from <b>${esc(fmtDate(new Date(b.ts).toISOString()))}</b> was found (auto-saved as you worked). You can restore it or keep it for later.</span><button class="btn btn-quiet btn-sm" data-action="restoreBackup">Restore backup</button><button class="btn btn-quiet btn-sm" data-action="dismissBanner">Dismiss</button></div>`;
+}
+function restoreBackup(){
+  let b=null;try{b=JSON.parse(localStorage.getItem(BACKUP_KEY)||'null')}catch(e){}
+  if(!b||!b.csv){notice('WARN','No backup found.');return}
+  if(loadCSV(b.csv)){el('dbStatus').textContent='Restored from local backup';notice('OK','Backup restored. Use Save / Export to write it to a CSV file.');markDirty()}
+  el('banner').innerHTML='';
+}
+
+/* ---------- undo & baseline ---------- */
+function takeSnapshot(){return{roles:deepClone(roles),people:deepClone(people),successors:deepClone(successors),rules:deepClone(rules),history:deepClone(history),boards:deepClone(boards),customFieldValues:deepClone(customFieldValues),activeTab}}
+function restoreSnapshot(s){roles=s.roles;people=s.people;successors=s.successors;rules=s.rules;history=s.history;boards=s.boards;customFieldValues=s.customFieldValues||{};activeTab=s.activeTab||'MASTER';render()}
+function pushUndo(action='Change'){undoStack.push({action,snapshot:takeSnapshot()});if(undoStack.length>40)undoStack.shift();markDirty()}
+function undoLastAction(){const last=undoStack.pop();if(!last){notice('WARN','Nothing to undo.');return}restoreSnapshot(last.snapshot);markDirty();notice('OK','Undid: '+last.action)}
+function captureImportBaseline(){importBaseline={roles:deepClone(roles),successors:deepClone(successors),boards:deepClone(boards)}}
+function resetOrgChanges(){
+  if(!importBaseline){notice('WARN','No imported baseline found. Open a CSV first.');return}
+  if(!confirm('Return imported roles and successor slates to the import baseline? New rules, new roles, and new candidates are kept.'))return;
+  pushUndo('Reset org changes');
+  const baseRoles=new Map(importBaseline.roles.map(r=>[r.id,r]));
+  roles=roles.map(r=>baseRoles.has(r.id)?deepClone(baseRoles.get(r.id)):r);
+  successors=deepClone(importBaseline.successors);
+  roles.forEach(r=>normalizeRanks(r.id));
+  log('Reset Org Changes','Restored imported role incumbents and successor slates.');
+  notice('OK','Org changes were reset to the imported baseline.');
+  render();
+}
+function clearAll(){
+  if(!confirm('Clear ALL data (roles, people, slates, rules, history)? You can Undo this.'))return;
+  pushUndo('Clear all data');
+  roles=[];people=[];successors=[];rules=[];history=[];messages=[];customFieldValues={};boards=systemBoards();activeTab='MASTER';
+  notice('WARN','All data cleared. Use Undo to bring it back.');
+  render();
+}
+
+/* ---------- custom dropdown values ---------- */
+function fieldKeyFromSelectId(id){return{pReady:'readiness',pSource:'source',pType:'candidateType',pPerf:'performance',pPot:'potential',pRet:'retentionRisk',pMob:'mobility',pConf:'confidence',pJob:'jobLevel',rLevel:'level',rDept:'department',pDept:'department',pLoc:'location',rBoard:'board',rManager:'managerRole',rRisk:'risk',rCrit:'criticality'}[id]||id||'custom'}
+function addCustomValue(field,value){field=field||'custom';value=String(value||'').trim();if(!value)return;if(!customFieldValues[field])customFieldValues[field]=[];if(!customFieldValues[field].includes(value))customFieldValues[field].push(value)}
+function getFieldValue(p,s,field){if(field in (p||{}))return p[field];if(field in (s||{}))return s[field];return ''}
+function valuesForField(field,base=[]){
+  const data=[];
+  const pIdx=new Map(people.map(p=>[p.id,p]));
+  people.forEach(p=>{const val=getFieldValue(p,null,field);if(String(val||'').trim())data.push(String(val).trim())});
+  successors.forEach(s=>{const val=getFieldValue(pIdx.get(s.personId)||{},s,field);if(String(val||'').trim())data.push(String(val).trim())});
+  roles.forEach(r=>{
+    if(field==='department'&&r.department)data.push(r.department);
+    if(field==='level'&&r.level)data.push(r.level);
+    if(field==='risk'&&r.risk)data.push(r.risk);
+    if(field==='criticality'&&r.criticality)data.push(r.criticality);
+  });
+  return [...new Set([...(base||[]),...(customFieldValues[field]||[]),...data].filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b)));
+}
+function departments(){return valuesForField('department',[])}
+function levels(){
+  const all=valuesForField('level',DEFAULT_LEVELS);
+  const known=DEFAULT_LEVELS.filter(l=>all.includes(l));
+  const custom=all.filter(l=>!DEFAULT_LEVELS.includes(l));
+  return [...known,...custom];
+}
+function customSelectOptions(options,selected,field=''){
+  let opts=field?valuesForField(field,options):[...options];
+  if(selected&&!opts.includes(selected))opts.unshift(selected);
+  opts=[...new Set(opts.filter(Boolean))];
+  return '<option value=""></option>'+opts.map(o=>`<option value="${attr(o)}" ${o===selected?'selected':''}>${esc(o)}</option>`).join('')+'<option value="__ADD__">+ Add value&hellip;</option>';
+}
+
+/* ---------- small "add value" modal ---------- */
+function openSmallValueBox(title,callback){
+  const old=el('smallValueModal');if(old)old.remove();
+  const wrap=document.createElement('div');
+  wrap.id='smallValueModal';wrap.className='modal-backdrop';
+  wrap.innerHTML=`<div class="modal"><h3>${esc(title||'Add value')}</h3><div class="hint" style="margin-bottom:10px">The new value becomes selectable anywhere this field is used, and is saved in the CSV.</div><input id="smallValueInput" placeholder="Type new value&hellip;" style="margin-bottom:12px"><div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn btn-quiet" id="smallCancel">Cancel</button><button type="button" class="btn btn-primary" id="smallAdd">Add</button></div></div>`;
+  document.body.appendChild(wrap);
+  const input=wrap.querySelector('#smallValueInput');
+  setTimeout(()=>input.focus(),40);
+  wrap.querySelector('#smallCancel').onclick=()=>wrap.remove();
+  wrap.addEventListener('mousedown',e=>{if(e.target===wrap)wrap.remove()});
+  wrap.querySelector('#smallAdd').onclick=()=>{const value=input.value.trim();if(!value)return;wrap.remove();callback(value)};
+  input.addEventListener('keydown',e=>{if(e.key==='Enter')wrap.querySelector('#smallAdd').click();if(e.key==='Escape')wrap.remove()});
+}
+
+function makeUniqueRoleId(title){const base='R-'+(String(title||'ROLE').toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-|-$/g,'')||'ROLE');let id=base,i=2;while(role(id)){id=base+'-'+i;i++}return id}
+
+function handleCustomSelect(sel){
+  if(sel.value!=='__ADD__'){sel.dataset.previous=sel.value;return}
+  const field=fieldKeyFromSelectId(sel.id);
+  const previous=sel.dataset.previous||'';
+  if(sel.id==='rManager'){
+    openSmallValueBox('Add manager role',value=>{
+      pushUndo('Add manager role option');
+      const id=makeUniqueRoleId(value);
+      const dept=v('rDept')&&v('rDept')!=='__ADD__'?v('rDept'):'';
+      roles.push({id,title:value,level:v('rLevel')&&v('rLevel')!=='__ADD__'?v('rLevel'):'Manager',department:dept,boardId:v('rBoard')&&v('rBoard')!=='__ADD__'?v('rBoard'):'',managerRoleId:'',incumbentPersonId:'',incumbentName:'VACANT',risk:'Medium',criticality:'Medium',owner:'',status:'Manager Role Added',sortOrder:roles.length+1});
+      const opt=document.createElement('option');opt.value=id;opt.textContent=value+' ('+id+')';
+      sel.insertBefore(opt,sel.querySelector('option[value="__ADD__"]'));
+      sel.value=id;sel.dataset.previous=id;
+      log('Manager Role Added',value+' added from role form');
+      notice('OK','Manager role added and selected: '+value);
+    });
+    sel.value=previous;return;
+  }
+  openSmallValueBox('Add value',value=>{
+    addCustomValue(field,value);
+    markDirty();
+    if(sel.id==='rBoard'){
+      const id='BOARD-'+(value.toUpperCase().replace(/[^A-Z0-9]+/g,'-')||uid('X'));
+      if(!boards.some(b=>b.id===id))boards.push({id,name:value});
+      const opt=document.createElement('option');opt.value=id;opt.textContent=value;
+      sel.insertBefore(opt,sel.querySelector('option[value="__ADD__"]'));sel.value=id;
+    }else{
+      const opt=document.createElement('option');opt.value=value;opt.textContent=value;
+      sel.insertBefore(opt,sel.querySelector('option[value="__ADD__"]'));sel.value=value;
+    }
+    sel.dataset.previous=sel.value;
+    refreshOpenRuleValueControls(field);
+  });
+  sel.value=previous;
+}
+function refreshOpenRuleValueControls(field){document.querySelectorAll('.condition-row').forEach(row=>{if(row.querySelector('.condField')?.value===field)updateConditionValue(row.querySelector('.condField'))})}
+
+/* ---------- drawer plumbing ---------- */
+function openDrawer(title,sub,body,save,left='',showBack=false){
+  el('drawerTitle').textContent=title;
+  el('drawerSub').textContent=sub;
+  el('drawerBody').innerHTML=body;
+  el('drawerSave').style.display='inline-flex';
+  el('drawerSave').onclick=save;
+  el('drawerLeft').innerHTML=left;
+  el('backBtn').style.display=showBack?'inline-flex':'none';
+  el('drawer').classList.add('open');
+  el('drawerBody').scrollTop=0;
+}
+function closeDrawer(){el('drawer').classList.remove('open');backRoleId=''}
+function goBack(){if(backRoleId){const rid=backRoleId;backRoleId='';openRoleDrawer(rid)}else closeDrawer()}
+function drawerIsOpen(){return el('drawer').classList.contains('open')}
+
+/* =====================================================================
+   CSV engine — format identical to v26
+   ===================================================================== */
+function parseCSV(text){
+  const rows=[];let row=[],val='',q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i],n=text[i+1];
+    if(c==='"'&&q&&n==='"'){val+='"';i++}
+    else if(c==='"')q=!q;
+    else if(c===','&&!q){row.push(val);val=''}
+    else if((c==='\n'||c==='\r')&&!q){if(val||row.length){row.push(val);rows.push(row);row=[];val=''}if(c==='\r'&&n==='\n')i++}
+    else val+=c;
+  }
+  if(val||row.length)rows.push([...row,val]);
+  return rows;
+}
+function csvEsc(v){const s=String(v??'');return /[",\n\r]/.test(s)?'"'+s.replaceAll('"','""')+'"':s}
+
+function loadCSV(text){
+  const rows=parseCSV(String(text||''));
+  if(rows.length<2){notice('ERR','CSV appears empty or invalid — nothing was loaded.');return false}
+  const headers=rows[0].map(h=>h.trim());
+  if(!headers.includes('recordType')){notice('ERR','This does not look like a Succession Planner CSV (missing recordType column).');return false}
+  boards=systemBoards();roles=[];people=[];successors=[];rules=[];history=[];messages=[];customFieldValues={};
+  rows.slice(1).forEach(row=>{
+    const o={};headers.forEach((h,i)=>o[h]=row[i]||'');
+    if(!Object.values(o).some(x=>String(x).trim()))return;
+    if(o.recordType==='BOARD'&&o.boardId&&!boards.some(b=>b.id===o.boardId))boards.push({id:o.boardId,name:o.boardName||o.boardId});
+    if(o.recordType==='PERSON'&&o.personId)people.push({id:o.personId,name:o.personName,title:o.personTitle,department:o.personDepartment,email:o.personEmail,location:o.location,jobLevel:o.jobLevel,performance:o.performance,potential:o.potential,retentionRisk:o.retentionRisk,mobility:o.mobility,criticalExperience:o.criticalExperience,skills:o.skills,readiness:o.readiness||'1-2 Years',source:o.source||'Internal',candidateType:o.candidateType||'Successor',confidence:o.confidence||'Medium',notes:o.notes});
+    if(o.recordType==='ROLE'&&o.roleId)roles.push({id:o.roleId,title:o.roleTitle,level:o.level||'VP',department:o.department,boardId:o.boardId,managerRoleId:o.managerRoleId,incumbentPersonId:o.incumbentPersonId,incumbentName:o.incumbentName,risk:o.risk||'Medium',criticality:o.criticality||'High',owner:o.owner,status:o.status||'Active Plan',sortOrder:Number(o.sortOrder||999)});
+    if(o.recordType==='SUCCESSOR'&&o.successorRoleId&&o.personId)successors.push({id:o.roleId||uid('S'),roleId:o.successorRoleId,personId:o.personId,readiness:o.readiness||'1-2 Years',source:o.source||'Internal',candidateType:o.candidateType||'Successor',confidence:o.confidence||'Medium',ranking:Number(o.ranking||999),notes:o.notes,approved:String(o.approved).toLowerCase()==='true',autoMoveQueued:String(o.autoMoveQueued).toLowerCase()==='true'});
+    if(o.recordType==='RULE'&&o.ruleId){
+      let op=o.ruleOperator;
+      // a BLOCK rule with no operator and no target role can only mean "cannot change role"
+      if((o.ruleType||'FIELD_RULE')==='BLOCK'&&!op&&!o.ruleTargetRoleId)op='cannot change role';
+      rules.push({id:o.ruleId,name:o.ruleName,type:o.ruleType||'FIELD_RULE',scope:o.ruleScope||'Candidate',field:o.ruleField,operator:op,value:o.ruleValue,personId:o.rulePersonId,targetRoleId:o.ruleTargetRoleId,altPersonId:o.ruleAltPersonId,severity:o.ruleSeverity||'Needs Review',message:o.ruleMessage,enabled:String(o.ruleEnabled).toLowerCase()!=='false'});
+    }
+    if(o.recordType==='HISTORY'&&o.historyId)history.push({id:o.historyId,date:o.historyDate,action:o.historyAction,details:o.historyDetails});
+    if(o.recordType==='SETTING'&&o.settingKey==='customFieldValues'){try{customFieldValues=JSON.parse(o.settingValue||'{}')||{}}catch(e){customFieldValues={}}}
+  });
+  consolidateDuplicateData(true);
+  validateDataLinks();
+  captureImportBaseline();
+  undoStack=[];selectedPersonId='';activeTab='MASTER';
+  markClean('CSV loaded — baseline captured');
+  render();
+  return true;
+}
+function toCSV(){
+  consolidateDuplicateData(false);
+  const rows=[CSV_HEADERS.join(',')];
+  const put=o=>rows.push(CSV_HEADERS.map(h=>csvEsc(o[h])).join(','));
+  boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).forEach(b=>put({recordType:'BOARD',boardId:b.id,boardName:b.name}));
+  people.forEach(p=>put({recordType:'PERSON',personId:p.id,personName:p.name,personTitle:p.title,personDepartment:p.department,personEmail:p.email,location:p.location,jobLevel:p.jobLevel,performance:p.performance,potential:p.potential,retentionRisk:p.retentionRisk,mobility:p.mobility,criticalExperience:p.criticalExperience,skills:p.skills,readiness:p.readiness,source:p.source,candidateType:p.candidateType,confidence:p.confidence,notes:p.notes}));
+  roles.forEach(r=>put({recordType:'ROLE',boardId:r.boardId,roleId:r.id,roleTitle:r.title,level:r.level,department:r.department,managerRoleId:r.managerRoleId,incumbentPersonId:r.incumbentPersonId,incumbentName:r.incumbentName,risk:r.risk,criticality:r.criticality,owner:r.owner,status:r.status,sortOrder:r.sortOrder}));
+  successors.forEach(s=>put({recordType:'SUCCESSOR',roleId:s.id,successorRoleId:s.roleId,personId:s.personId,readiness:s.readiness,source:s.source,candidateType:s.candidateType,confidence:s.confidence,ranking:s.ranking,notes:s.notes,approved:s.approved,autoMoveQueued:s.autoMoveQueued}));
+  rules.forEach(r=>put({recordType:'RULE',ruleId:r.id,ruleName:r.name,ruleType:r.type,ruleScope:r.scope,ruleField:r.field,ruleOperator:r.operator,ruleValue:r.value,rulePersonId:r.personId,ruleTargetRoleId:r.targetRoleId,ruleAltPersonId:r.altPersonId,ruleSeverity:r.severity,ruleMessage:r.message,ruleEnabled:r.enabled}));
+  history.forEach(h=>put({recordType:'HISTORY',historyId:h.id,historyDate:h.date,historyAction:h.action,historyDetails:h.details}));
+  put({recordType:'SETTING',settingKey:'customFieldValues',settingValue:JSON.stringify(customFieldValues)});
+  return rows.join('\n');
+}
+function download(name,content,type){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url)}
+async function openCSV(){
+  if('showOpenFilePicker' in window){
+    try{
+      [fileHandle]=await window.showOpenFilePicker({types:[{description:'CSV',accept:{'text/csv':['.csv']}}],multiple:false});
+      const f=await fileHandle.getFile();
+      if(loadCSV(await f.text()))el('dbStatus').textContent=f.name;
+      return;
+    }catch(e){if(e&&e.name!=='AbortError')console.warn(e);setStatus('Open cancelled');return}
+  }
+  const input=document.createElement('input');
+  input.type='file';input.accept='.csv,text/csv';
+  input.onchange=async()=>{const f=input.files[0];if(f&&loadCSV(await f.text()))el('dbStatus').textContent=f.name};
+  input.click();
+}
+function exportCSV(){download('succession_planner_database.csv',toCSV(),'text/csv');markClean('Exported CSV copy '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}
+async function saveCSV(){
+  const csv=toCSV();
+  if(fileHandle&&'createWritable' in fileHandle){
+    try{
+      const w=await fileHandle.createWritable();await w.write(csv);await w.close();
+      markClean('Saved '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
+      notice('OK','Saved back to the opened CSV file.');
+      return;
+    }catch(e){console.warn(e)}
+  }
+  download('succession_planner_database.csv',csv,'text/csv');
+  markClean('Downloaded CSV copy '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
+}
+
+/* ---------- data hygiene ---------- */
+function isEmergencyCandidate(s){return String(s?.candidateType||'').toLowerCase().includes('emergency')}
+function readinessScore(val){const n=norm(val);if(n==='ready now')return 1;if(n.includes('1-2'))return 2;if(n.includes('3-5'))return 3;if(!n)return 9;return 5}
+function bestReadiness(vals){return vals.filter(Boolean).sort((a,b)=>readinessScore(a)-readinessScore(b))[0]||''}
+function consolidateDuplicateData(showNotice=false){
+  const pMap=new Map();
+  people.forEach(p=>{if(!p.id)return;if(!pMap.has(p.id))pMap.set(p.id,p);else{const base=pMap.get(p.id);Object.keys(p).forEach(k=>{if((base[k]===undefined||base[k]==='')&&p[k])base[k]=p[k]})}});
+  people=[...pMap.values()];
+  const groups=new Map();
+  successors.forEach(s=>{const key=`${s.roleId}||${s.personId}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(s)});
+  const out=[];let dups=0;
+  groups.forEach(items=>{
+    if(items.length===1){out.push(items[0]);return}
+    dups+=items.length-1;
+    const primary=items.filter(x=>!isEmergencyCandidate(x)).sort((a,b)=>(+a.ranking||999)-(+b.ranking||999))[0]||items[0];
+    const m={...primary};
+    m.readiness=bestReadiness(items.map(x=>x.readiness));
+    m.candidateType=[...new Set(items.map(x=>x.candidateType).filter(Boolean))].join(' / ');
+    m.approved=items.some(x=>x.approved);
+    m.autoMoveQueued=items.some(x=>x.autoMoveQueued);
+    out.push(m);
+  });
+  successors=out;
+  roles.forEach(r=>normalizeRanks(r.id));
+  if(showNotice&&dups)notice('WARN',`${dups} duplicate candidate assignment(s) were merged.`);
+}
+function validateDataLinks(){
+  const missingPeople=[...new Set(successors.filter(s=>!person(s.personId)).map(s=>s.personId).filter(Boolean))];
+  const missingRoles=[...new Set(successors.filter(s=>!role(s.roleId)).map(s=>s.roleId).filter(Boolean))];
+  if(missingPeople.length)notice('ERR',`Data mismatch: successor person IDs missing from People: ${missingPeople.slice(0,5).join(', ')}`);
+  if(missingRoles.length)notice('ERR',`Data mismatch: successor role IDs missing from Roles: ${missingRoles.slice(0,5).join(', ')}`);
+}
+</script>
+<script>
+/* =====================================================================
+   Slate operations
+   ===================================================================== */
+function currentRoleForPerson(pid){return roles.find(r=>r.incumbentPersonId===pid)||null}
+function isRoleVacant(r){return !r.incumbentPersonId||['vacant','tbd','open','none',''].includes(norm(r.incumbentName))}
+function slateFor(rid){return successors.filter(s=>s.roleId===rid).sort((a,b)=>(+a.ranking||999)-(+b.ranking||999))}
+function nextRank(rid){const nums=successors.filter(s=>s.roleId===rid).map(s=>+s.ranking||0);return nums.length?Math.max(...nums)+1:1}
+function normalizeRanks(rid){slateFor(rid).forEach((s,i)=>s.ranking=i+1)}
+
+function addSuccessor(pid,rid){
+  const p=person(pid),r=role(rid);
+  if(!p||!r)return;
+  if(successors.some(s=>s.personId===pid&&s.roleId===rid)){notice('WARN',`${p.name} is already a candidate for ${r.title}.`);return}
+  pushUndo('Add candidate to role');
+  successors.push({id:uid('S'),roleId:rid,personId:pid,readiness:p.readiness||'1-2 Years',source:p.source||'Internal',candidateType:p.candidateType||'Successor',confidence:p.confidence||'Medium',ranking:nextRank(rid),notes:'',approved:false,autoMoveQueued:false});
+  log('Candidate Added',`${p.name} added to ${r.title}`);
+  notice('OK',`${p.name} added to the ${r.title} slate.`);
+  render();
+}
+function addSuccessorBefore(pid,rid,targetSid){
+  const before=successors.length;
+  addSuccessor(pid,rid);
+  if(successors.length===before)return; // duplicate rejected
+  const added=successors.filter(s=>s.roleId===rid&&s.personId===pid).sort((a,b)=>(+b.ranking||0)-(+a.ranking||0))[0];
+  if(added)reorderSuccessorBefore(added.id,targetSid,true);
+}
+function reorderSuccessorBefore(dragSid,targetSid,skipUndo=false){
+  const drag=successors.find(x=>x.id===dragSid),target=successors.find(x=>x.id===targetSid);
+  if(!drag||!target||drag.id===target.id)return;
+  if(!skipUndo){
+    if(drag.roleId!==target.roleId&&successors.some(x=>x.personId===drag.personId&&x.roleId===target.roleId&&x.id!==drag.id)){notice('WARN',`${personName(drag.personId)} already exists in ${role(target.roleId)?.title||target.roleId}.`);return}
+    pushUndo('Reorder candidate priority');
+  }
+  const oldRole=drag.roleId;
+  drag.roleId=target.roleId;
+  const list=successors.filter(x=>x.roleId===target.roleId&&x.id!==drag.id).sort((a,b)=>(+a.ranking||999)-(+b.ranking||999));
+  const idx=list.findIndex(x=>x.id===target.id);
+  list.splice(idx<0?list.length:idx,0,drag);
+  list.forEach((s,i)=>s.ranking=i+1);
+  if(oldRole!==target.roleId)normalizeRanks(oldRole);
+  render();
+}
+function moveSuccessorToRole(sid,rid){
+  const s=successors.find(x=>x.id===sid),r=role(rid);
+  if(!s||!r||s.roleId===rid)return;
+  if(successors.some(x=>x.personId===s.personId&&x.roleId===rid&&x.id!==sid)){notice('WARN',`${personName(s.personId)} already exists in ${r.title}.`);return}
+  pushUndo('Move candidate to role');
+  const old=s.roleId;
+  s.roleId=rid;s.ranking=nextRank(rid);s.approved=false;
+  normalizeRanks(old);normalizeRanks(rid);
+  log('Candidate Moved',`${personName(s.personId)} moved from ${role(old)?.title||old} to ${r.title}`);
+  render();
+}
+function moveRank(sid,delta){
+  const s=successors.find(x=>x.id===sid);if(!s)return;
+  const list=slateFor(s.roleId);
+  const i=list.findIndex(x=>x.id===sid),j=i+delta;
+  if(j<0||j>=list.length)return;
+  pushUndo('Move candidate priority');
+  const t=list[i].ranking;list[i].ranking=list[j].ranking;list[j].ranking=t;
+  normalizeRanks(s.roleId);
+  render();
+}
+function removeSuccessor(sid){
+  const s=successors.find(x=>x.id===sid);if(!s)return;
+  pushUndo('Remove candidate from slate');
+  successors=successors.filter(x=>x.id!==sid);
+  normalizeRanks(s.roleId);
+  log('Candidate Removed',`${personName(s.personId)} removed from ${role(s.roleId)?.title||s.roleId}`);
+  render();
+}
+
+/* =====================================================================
+   Rules engine
+   ===================================================================== */
+function compare(val,op,w){
+  const val2=norm(val),wn=norm(w);
+  const list=String(w||'').split('|').map(norm).filter(Boolean);
+  if(op==='equals')return val2===wn;
+  if(op==='not equals')return val2!==wn;
+  if(op==='contains')return !!wn&&val2.includes(wn);
+  if(op==='not contains')return !wn||!val2.includes(wn);
+  if(op==='list'||op==='in list')return list.includes(val2);
+  return false;
+}
+function safeJSON(value,fallback){try{return JSON.parse(value||'')}catch(e){return fallback}}
+function ruleConditions(rule){
+  const parsed=safeJSON(rule.value,null);
+  if(Array.isArray(parsed))return parsed.filter(c=>c&&c.field&&c.operator);
+  if(rule.field&&rule.operator)return[{field:rule.field,operator:rule.operator,value:rule.value}];
+  return[];
+}
+function autoRuleConfig(rule){
+  const parsed=safeJSON(rule.value,null);
+  if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))return parsed;
+  const types=String(rule.value||'').split('|').filter(Boolean);
+  return{mode:types.includes('Custom')?'custom':'type',autoTypes:types.filter(x=>x!=='Custom'),customMappings:[]};
+}
+function evaluateRules(s){
+  const p=person(s.personId),r=role(s.roleId);
+  const pname=p?p.name:(s.personId||'Unknown person');
+  const blocks=[],reviews=[];
+  rules.filter(x=>x.enabled).forEach(rule=>{
+    let hit=false;
+    if(rule.type==='BLOCK'){
+      const old=currentRoleForPerson(s.personId),op=rule.operator||'cannot move to target role';
+      const personMatches=!rule.personId||rule.personId===s.personId;
+      hit=op==='cannot change role'?(personMatches&&old&&old.id!==s.roleId):(personMatches&&rule.targetRoleId===s.roleId);
+    }else if(rule.type==='FIELD_RULE'){
+      const conds=ruleConditions(rule);
+      hit=conds.length&&conds.every(c=>compare(getFieldValue(p,s,c.field),c.operator,c.value));
+    }
+    if(hit){const msg=rule.message||`${rule.name||'Rule'} triggered`;(rule.severity==='Needs Review'?reviews:blocks).push(msg)}
+  });
+  if(s.readiness!=='Ready Now')reviews.push(`${pname} readiness is ${s.readiness}.`);
+  if(s.source==='External')reviews.push(`${pname} is External.`);
+  if(s.confidence&&s.confidence!=='High')reviews.push(`${pname} confidence is ${s.confidence}.`);
+  const count=successors.filter(x=>x.personId===s.personId).length;
+  if(count>1)reviews.push(`${pname} is a candidate for ${count} roles; approval removes the other slate entries.`);
+  return{blocks,reviews};
+}
+function confirmApproval(s){
+  const e=evaluateRules(s);
+  if(e.blocks.length){e.blocks.forEach(m=>notice('ERR',m));return false}
+  e.reviews.forEach(m=>notice('WARN',m));
+  return true;
+}
+function approveTop(rid){
+  const top=slateFor(rid)[0];
+  if(!top){notice('WARN','No candidate to approve.');return}
+  approveSuccessor(top.id);
+}
+function approveSuccessor(sid){
+  const s=successors.find(x=>x.id===sid);if(!s)return;
+  const p=person(s.personId),r=role(s.roleId);
+  if(!p||!r){notice('ERR','Cannot approve: person or role record is missing.');return}
+  if(!confirmApproval(s))return;
+  pushUndo('Approve move');
+  automationDepth=0;
+  const old=currentRoleForPerson(s.personId);
+  successors.filter(x=>x.roleId===s.roleId).forEach(x=>x.approved=false);
+  s.approved=true;
+  const affected=new Set(successors.filter(x=>x.personId===s.personId&&x.id!==s.id).map(x=>x.roleId));
+  successors=successors.filter(x=>x.id===s.id||x.personId!==s.personId);
+  affected.forEach(rid=>normalizeRanks(rid));
+  const replaced=r.incumbentPersonId?personName(r.incumbentPersonId,r.incumbentName):'VACANT';
+  r.incumbentPersonId=s.personId;r.incumbentName=p.name;r.status='Approved Move';
+  if(old&&old.id!==r.id){
+    old.incumbentPersonId='';old.incumbentName='VACANT';old.status='Action Required';old.risk='High';
+    runVacancyAutomation(old.id);
+  }
+  notice('OK',`${p.name} approved into ${r.title}.`);
+  log('Approved Move',`${p.name} moved to ${r.title}; replaced ${replaced}`);
+  render();
+}
+function autoMove(sid){
+  const s=successors.find(x=>x.id===sid);
+  const r=s?role(s.roleId):null,p=s?person(s.personId):null;
+  if(!s||!r||!p)return;
+  const e=evaluateRules(s);
+  if(e.blocks.length){e.blocks.forEach(m=>notice('ERR',m));return}
+  pushUndo('Auto move / queue');
+  automationDepth=0;
+  if(!isRoleVacant(r)){s.autoMoveQueued=true;notice('WARN',`${p.name} queued for Auto Move into ${r.title} when it becomes vacant.`);render();return}
+  executeAutoMove(s,'manually triggered on vacant role');
+}
+function executeAutoMove(s,reason){
+  const r=role(s.roleId),p=person(s.personId);
+  if(!r||!p||!isRoleVacant(r))return false;
+  if(++automationDepth>25){notice('ERR','Automation chain stopped after 25 steps (possible rule loop).');return false}
+  const old=currentRoleForPerson(s.personId);
+  r.incumbentPersonId=s.personId;r.incumbentName=p.name;r.status='Auto Move';
+  const affected=new Set(successors.filter(x=>x.personId===s.personId).map(x=>x.roleId));
+  successors=successors.filter(x=>x.personId!==s.personId);
+  affected.forEach(rid=>normalizeRanks(rid));
+  if(old&&old.id!==r.id){
+    old.incumbentPersonId='';old.incumbentName='VACANT';old.status='Action Required';
+    runVacancyAutomation(old.id);
+  }
+  log('Auto Move',`${p.name} auto-moved to ${r.title}; ${reason}`);
+  notice('OK',`${p.name} auto-moved to ${r.title}.`);
+  render();
+  return true;
+}
+function candidateHasType(s,type){return String(s.candidateType||'').split('/').map(x=>x.trim()).includes(type)||String(s.candidateType||'').includes(type)}
+function runVacancyAutomation(roleId){return runAutoBackfillRulesForVacantRole(roleId)||runAutoMoveQueueForRole(roleId)}
+function runAutoBackfillRulesForVacantRole(roleId){
+  const r=role(roleId);
+  if(!r||!isRoleVacant(r))return false;
+  for(const rule of rules.filter(x=>x.enabled&&x.type==='AUTO_BACKFILL')){
+    const cfg=autoRuleConfig(rule);
+    if((cfg.autoTypes||[]).length){
+      const chosen=successors.filter(s=>s.roleId===roleId&&(cfg.autoTypes||[]).some(t=>candidateHasType(s,t))).sort((a,b)=>(+a.ranking||999)-(+b.ranking||999))[0];
+      if(chosen)return executeAutoMove(chosen,`auto backfill rule ${rule.name||rule.id}`);
+    }
+    if(cfg.mode==='custom'||(cfg.autoTypes||[]).includes('Custom')){
+      const map=(cfg.customMappings||[]).find(m=>m.roleId===roleId&&m.personId&&person(m.personId));
+      if(map){
+        if(!successors.some(s=>s.roleId===roleId&&s.personId===map.personId))successors.push({id:uid('S'),roleId,personId:map.personId,readiness:person(map.personId)?.readiness||'1-2 Years',source:person(map.personId)?.source||'Internal',candidateType:person(map.personId)?.candidateType||'Successor',confidence:'Medium',ranking:nextRank(roleId),notes:'Auto-added by custom rule',approved:false,autoMoveQueued:false});
+        const chosen=successors.find(s=>s.roleId===roleId&&s.personId===map.personId);
+        return executeAutoMove(chosen,`custom rule ${rule.name||rule.id}`);
+      }
+    }
+  }
+  return false;
+}
+function runAutoMoveQueueForRole(roleId){
+  const r=role(roleId);
+  if(!r||!isRoleVacant(r))return false;
+  const q=successors.filter(s=>s.roleId===roleId&&s.autoMoveQueued).sort((a,b)=>(+a.ranking||999)-(+b.ranking||999))[0];
+  return q?executeAutoMove(q,'queued for vacancy'):false;
+}
+
+/* =====================================================================
+   Rendering
+   ===================================================================== */
+function render(){
+  fillFilters();
+  renderTabs();
+  renderStats();
+  if(activeTab==='MASTER')renderTree();
+  else if(activeTab==='PEOPLE')renderPeople();
+  else if(activeTab==='RULES')renderRulesPage();
+  else if(activeTab==='HISTORY')renderHistoryPage();
+  else if(activeTab==='INSIGHTS')renderInsights();
+  else renderBoard();
+  renderPieceBox();
+  renderApproved();
+  renderMessages();
+}
+function setView(title,hint,actions=''){el('viewTitle').textContent=title;el('viewHint').innerHTML=hint||'';el('viewActions').innerHTML=actions||''}
+function fillFilters(){
+  const lf=el('levelFilter'),df=el('deptFilter'),pd=el('pieceDept'),rf=el('riskFilter'),rd=el('readinessFilter');
+  const keep=(sel,val,fallback)=>{sel.value=[...sel.options].some(o=>o.value===val)?val:fallback};
+  const lv=lf.value,dv=df.value,pv=pd.value,rv=rf.value,rdv=rd.value;
+  const opt=x=>`<option>${esc(x)}</option>`;
+  lf.innerHTML=opt('All Levels')+levels().map(opt).join('');
+  df.innerHTML=opt('All Departments')+departments().map(opt).join('');
+  pd.innerHTML=opt('All Departments')+departments().map(opt).join('');
+  rf.innerHTML=opt('All Risks')+valuesForField('risk',['High','Medium','Low']).map(opt).join('');
+  rd.innerHTML=opt('All Readiness')+valuesForField('readiness',['Ready Now','1-2 Years','3-5 Years']).map(opt).join('')+opt('No Candidate');
+  keep(lf,lv,'All Levels');keep(df,dv,'All Departments');keep(pd,pv,'All Departments');keep(rf,rv,'All Risks');keep(rd,rdv,'All Readiness');
+}
+function renderTabs(){
+  const customs=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id));
+  const order=[boards.find(b=>b.id==='MASTER'),boards.find(b=>b.id==='ALL'),...customs,boards.find(b=>b.id==='PEOPLE'),boards.find(b=>b.id==='INSIGHTS'),boards.find(b=>b.id==='RULES'),boards.find(b=>b.id==='HISTORY')].filter(Boolean);
+  const count=b=>b.id==='PEOPLE'?`<span class="count">${people.length}</span>`:b.id==='RULES'?`<span class="count">${rules.length}</span>`:'';
+  el('tabs').innerHTML=order.map(b=>`<button class="tab ${activeTab===b.id?'active':''}" data-action="tab" data-tab-id="${attr(b.id)}">${esc(b.name)}${count(b)}</button>`).join('')+
+    `<button class="tab tab-add" data-action="manageTabs" title="Add or manage board tabs">+</button>`;
+}
+function renderStats(){
+  el('stats').innerHTML=
+    `<div class="stat"><b>${roles.length}</b><span>Roles</span></div>`+
+    `<div class="stat"><b>${people.length}</b><span>People</span></div>`+
+    `<div class="stat"><b>${successors.length}</b><span>Slate rows</span></div>`+
+    `<div class="stat"><b>${successors.filter(s=>s.approved).length}</b><span>Approved</span></div>`;
+}
+function filteredRoles(){
+  const q=norm(v('search')),lf=v('levelFilter'),rf=v('riskFilter'),read=v('readinessFilter'),df=v('deptFilter');
+  const boardObj=boards.find(b=>b.id===activeTab);
+  const pIdx=new Map(people.map(p=>[p.id,p]));
+  const nm=id=>pIdx.get(id)?.name||'';
+  const byRole=new Map();
+  successors.forEach(s=>{const arr=byRole.get(s.roleId);if(arr)arr.push(s);else byRole.set(s.roleId,[s])});
+  return roles.filter(r=>{
+    const ss=byRole.get(r.id)||[];
+    const txt=[r.id,r.title,r.level,r.department,r.incumbentName,nm(r.incumbentPersonId),ss.map(s=>nm(s.personId)).join(' ')].join(' ').toLowerCase();
+    const onBoard=SYSTEM_BOARDS.includes(activeTab)||r.boardId===activeTab||boardObj?.name===r.department;
+    const rr=read==='All Readiness'||(read==='No Candidate'?ss.length===0:ss.some(s=>s.readiness===read));
+    return onBoard&&txt.includes(q)&&(lf==='All Levels'||r.level===lf)&&(rf==='All Risks'||r.risk===rf)&&(df==='All Departments'||r.department===df)&&rr;
+  });
+}
+function emptyState(big,small,buttons=''){return `<div class="empty"><div class="big">${big}</div><div>${small}</div>${buttons}</div>`}
+
+/* ---------- board ---------- */
+function renderBoard(){
+  const name=boards.find(b=>b.id===activeTab)?.name||'Board';
+  setView(name==='All Roles'?'All Roles':name+' Board','Drag a candidate from the Candidate Box onto a role. Drag slate rows to reorder priority, or use the arrows.');
+  const fr=filteredRoles();
+  const lvls=levels();
+  let html='';
+  lvls.forEach(l=>{
+    const list=fr.filter(r=>r.level===l).sort((a,b)=>(+a.sortOrder||999)-(+b.sortOrder||999));
+    if(!list.length)return;
+    html+=`<section class="level"><div class="level-head"><span>${esc(l)}</span><span>${plur(list.length,'role')}</span></div><div class="lane">${list.map(roleCard).join('')}</div></section>`;
+  });
+  const noLevel=fr.filter(r=>!lvls.includes(r.level));
+  if(noLevel.length)html+=`<section class="level"><div class="level-head"><span>Unassigned level</span><span>${plur(noLevel.length,'role')}</span></div><div class="lane">${noLevel.map(roleCard).join('')}</div></section>`;
+  el('mainView').innerHTML=html||(roles.length
+    ?emptyState('No roles match the current filters','Try clearing the search box or filters above.')
+    :emptyState('No roles yet','Open your CSV database or add your first role.',`<button class="btn btn-quiet" data-action="openCSV">Open CSV</button> <button class="btn btn-primary" data-action="openRoleDrawerNew" style="margin-left:6px">+ Add Role</button>`));
+}
+function roleCard(r){
+  const ss=slateFor(r.id);
+  const vac=isRoleVacant(r);
+  const inc=vac
+    ?`<div class="incumbent"><span class="badge red">VACANT</span><div class="who"><span>Needs incumbent or backfill</span></div></div>`
+    :`<div class="incumbent">${avatarHtml(personName(r.incumbentPersonId,r.incumbentName),26)}<div class="who"><b>${esc(personName(r.incumbentPersonId,r.incumbentName||'VACANT'))}</b><span>Incumbent${r.status?' · '+esc(r.status):''}</span></div></div>`;
+  const assign=selectedPersonId&&person(selectedPersonId)?`<button class="btn btn-quiet btn-sm" data-action="assignSelected" data-role-id="${attr(r.id)}" title="Add the selected candidate to this slate">+ ${esc(personName(selectedPersonId))}</button>`:'';
+  return `<article class="role risk-${norm(r.risk)||'none'}" data-drop="role" data-role-id="${attr(r.id)}">
+    <div class="role-top"><div><div class="role-name">${esc(r.title)}</div><div class="role-meta">${esc(r.level||'')}${r.department?' · '+esc(r.department):''}</div></div>${riskBadge(r.risk)}</div>
+    ${inc}
+    <div class="chips"><span class="chip">${esc(r.id)}</span><span class="chip">${plur(ss.length,'candidate')}</span>${r.criticality?`<span class="chip">${esc(r.criticality)}</span>`:''}</div>
+    <div class="succ-list">${ss.length?ss.map(succPill).join(''):'<div class="drop-hint">Drop a candidate here</div>'}</div>
+    <div class="role-actions"><button class="btn btn-quiet btn-sm" data-action="approveTop" data-role-id="${attr(r.id)}">Approve Top</button><button class="btn btn-quiet btn-sm" data-action="openRole" data-role-id="${attr(r.id)}">Open</button>${assign}</div>
+  </article>`;
+}
+function succPill(s){
+  const flags=`${s.approved?'<span title="Approved">&#10003;</span>':''}${s.autoMoveQueued?'<span title="Queued for auto move">&#9889;</span>':''}`;
+  return `<div class="succ ${s.approved?'approved':''} ${s.autoMoveQueued?'autoqueued':''}" draggable="true" data-drag="succ" data-drop="succ" data-succ-id="${attr(s.id)}" data-person-id="${attr(s.personId)}" data-action="openPersonFromSlate" title="Click to open profile. Drag to reorder or move.">
+    <span class="rank">${esc(s.ranking||'')}</span>
+    <span class="succ-main"><span class="nm">${esc(personName(s.personId))}</span><span class="sub">${esc(s.readiness||'')} · ${esc(s.candidateType||'')}</span></span>
+    <span class="succ-flags">${flags}</span>
+    <span class="succ-btns">
+      <button class="icon-btn" data-action="rank" data-succ-id="${attr(s.id)}" data-delta="-1" title="Move up">&#8593;</button>
+      <button class="icon-btn" data-action="rank" data-succ-id="${attr(s.id)}" data-delta="1" title="Move down">&#8595;</button>
+      <button class="icon-btn warn" data-action="autoMove" data-succ-id="${attr(s.id)}" title="Auto move now if vacant, else queue">&#9889;</button>
+      <button class="icon-btn ok" data-action="approveSucc" data-succ-id="${attr(s.id)}" title="Approve this move">&#10003;</button>
+      <button class="icon-btn bad" data-action="removeSucc" data-succ-id="${attr(s.id)}" title="Remove from slate">&#10005;</button>
+    </span>
+  </div>`;
+}
+
+/* ---------- org tree ---------- */
+function renderTree(){
+  setView('Master Org Tree','Reporting lines follow each role’s Manager Role field. Click a role to open it.');
+  const roots=roles.filter(r=>!r.managerRoleId||!role(r.managerRoleId));
+  el('mainView').innerHTML='<div class="tree">'+(roots.length
+    ?'<div class="tree-item" style="flex-direction:row;align-items:flex-start">'+roots.map(r=>treeNode(r,new Set())).join('')+'</div>'
+    :emptyState('No data yet','Open your CSV database or add your first role.',`<button class="btn btn-quiet" data-action="openCSV">Open CSV</button> <button class="btn btn-primary" data-action="openRoleDrawerNew" style="margin-left:6px">+ Add Role</button>`))+'</div>';
+}
+function treeNode(r,seen){
+  if(seen.has(r.id))return '';
+  seen.add(r.id);
+  const kids=roles.filter(x=>x.managerRoleId===r.id).sort((a,b)=>(+a.sortOrder||999)-(+b.sortOrder||999));
+  const vac=isRoleVacant(r);
+  return `<div class="tree-item"><div class="node" data-action="openRole" data-role-id="${attr(r.id)}"><b>${esc(r.title)}</b><div class="nsub ${vac?'nvac':''}">${vac?'VACANT':esc(personName(r.incumbentPersonId,r.incumbentName||'VACANT'))}</div><div class="nsub">${esc(r.level||'')}${r.department?' · '+esc(r.department):''}</div></div>${kids.length?'<div class="children">'+kids.map(k=>treeNode(k,seen)).join('')+'</div>':''}</div>`;
+}
+
+/* ---------- people ---------- */
+function renderPeople(){
+  setView('Candidates','Every person is stored once by Person ID — edits update all slates that reference them.',`<button class="btn btn-green btn-sm" data-action="openPersonDrawerNew">+ Add Candidate</button>`);
+  const q=norm(v('search')),d=v('deptFilter');
+  const list=people.filter(p=>[p.id,p.name,p.title,p.department,p.location,p.readiness,p.candidateType,p.skills].join(' ').toLowerCase().includes(q)&&(d==='All Departments'||p.department===d));
+  const rows=list.slice(0,LIST_CAP).map(p=>{
+    const slates=successors.filter(s=>s.personId===p.id).length;
+    const cur=currentRoleForPerson(p.id);
+    return `<tr class="row-click" data-action="openPerson" data-person-id="${attr(p.id)}">
+      <td style="display:flex;align-items:center;gap:8px">${avatarHtml(p.name,26)}<div><b>${esc(p.name)}</b><div style="color:var(--muted);font-size:11px">${esc(p.id)}</div></div></td>
+      <td>${esc(p.title||'')}${cur?`<div style="color:var(--muted);font-size:11px">in ${esc(cur.title)}</div>`:''}</td>
+      <td>${esc(p.department||'')}</td><td>${esc(p.location||'')}</td>
+      <td>${readinessBadge(p.readiness)}</td><td>${esc(p.candidateType||'')}</td>
+      <td style="text-align:center">${slates||'—'}</td>
+    </tr>`;
+  }).join('');
+  el('mainView').innerHTML=list.length
+    ?`<div class="tablebox"><table class="table"><thead><tr><th>Name</th><th>Title</th><th>Department</th><th>Location</th><th>Readiness</th><th>Type</th><th>Slates</th></tr></thead><tbody>${rows}</tbody></table>${list.length>LIST_CAP?`<div class="tfoot-note">Showing ${LIST_CAP} of ${list.length} — refine the search to see more.</div>`:''}</div>`
+    :emptyState('No candidates found','Add a candidate or adjust the search.',`<button class="btn btn-green" data-action="openPersonDrawerNew">+ Add Candidate</button>`);
+}
+
+/* ---------- rules ---------- */
+function ruleSummary(r){
+  if(r.type==='BLOCK'){
+    const who=r.personId?personName(r.personId,r.personId):'Any person';
+    return r.operator==='cannot change role'?`${who} cannot change role`:`${who} cannot move to ${role(r.targetRoleId)?.title||r.targetRoleId||'(no target role set)'}`;
+  }
+  if(r.type==='AUTO_BACKFILL'){
+    const cfg=autoRuleConfig(r);
+    if(cfg.mode==='custom'||(cfg.autoTypes||[]).includes('Custom'))return `Custom backfill chart (${(cfg.customMappings||[]).length} mapping${(cfg.customMappings||[]).length===1?'':'s'})`;
+    return `Backfill vacant roles from type: ${(cfg.autoTypes||[]).join(', ')||'?'}`;
+  }
+  const conds=ruleConditions(r);
+  return conds.map(c=>`${c.field} ${c.operator} ${String(c.value||'').split('|').join(', ')}`).join(' AND ')||'—';
+}
+function renderRulesPage(){
+  setView('Rules','Rules run when candidates are approved or auto-moved. Priority: Block / Field rules stop moves → Auto Backfill fills vacancies → Auto Move queue.',`<button class="btn btn-green btn-sm" data-action="openRuleDrawerNew">+ New Rule</button>`);
+  const q=norm(v('search'));
+  const list=rules.filter(r=>[r.id,r.name,r.type,r.severity,ruleSummary(r)].join(' ').toLowerCase().includes(q));
+  const typeBadge=t=>t==='BLOCK'?'<span class="badge red">Block move</span>':t==='AUTO_BACKFILL'?'<span class="badge blue">Auto backfill</span>':'<span class="badge amber">Candidate rule</span>';
+  const rows=list.map(r=>`<tr>
+      <td><input type="checkbox" class="switch" data-change="ruleToggle" data-rule-id="${attr(r.id)}" ${r.enabled?'checked':''} title="Enable / disable"></td>
+      <td><b>${esc(r.name||r.id)}</b><div style="color:var(--muted);font-size:11px">${esc(r.id)}</div></td>
+      <td>${typeBadge(r.type)}</td>
+      <td class="rule-summary">${esc(ruleSummary(r))}</td>
+      <td>${r.severity==='Needs Review'?'<span class="badge amber">Needs Review</span>':'<span class="badge red">Block</span>'}</td>
+      <td><button class="btn btn-quiet btn-sm" data-action="openRule" data-rule-id="${attr(r.id)}">Open</button></td>
+    </tr>`).join('');
+  el('mainView').innerHTML=list.length
+    ?`<div class="tablebox"><table class="table"><thead><tr><th>On</th><th>Rule</th><th>Type</th><th>What it does</th><th>Severity</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    :emptyState('No rules yet','Rules can block risky moves or automatically backfill vacant roles.',`<button class="btn btn-green" data-action="openRuleDrawerNew">+ New Rule</button>`);
+}
+
+/* ---------- history ---------- */
+function renderHistoryPage(){
+  setView('History','A full audit trail of changes. History is saved in the CSV.');
+  const q=norm(v('search'));
+  const list=history.filter(h=>[h.date,h.action,h.details].join(' ').toLowerCase().includes(q));
+  const rows=list.slice(0,LIST_CAP).map(h=>`<tr><td style="white-space:nowrap">${esc(fmtDate(h.date))}</td><td style="white-space:nowrap"><b>${esc(h.action)}</b></td><td>${esc(h.details)}</td></tr>`).join('');
+  el('mainView').innerHTML=list.length
+    ?`<div class="tablebox"><table class="table"><thead><tr><th>When</th><th>Action</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table>${list.length>LIST_CAP?`<div class="tfoot-note">Showing ${LIST_CAP} of ${list.length} entries.</div>`:''}</div>`
+    :emptyState('No history yet','Changes you make will be logged here and saved to the CSV.');
+}
+
+/* ---------- insights ---------- */
+function renderInsights(){
+  setView('Insights','Bench strength at a glance. The filters above apply to these numbers.');
+  const fr=filteredRoles();
+  const frIds=new Set(fr.map(r=>r.id));
+  const ss=successors.filter(s=>frIds.has(s.roleId));
+  const slateSet=new Set(ss.map(s=>s.roleId));
+  const readySet=new Set(ss.filter(s=>norm(s.readiness)==='ready now').map(s=>s.roleId));
+  const covered=fr.filter(r=>slateSet.has(r.id));
+  const readyCovered=fr.filter(r=>readySet.has(r.id));
+  const vacant=fr.filter(isRoleVacant);
+  const highRisk=fr.filter(r=>['high','critical'].includes(norm(r.risk)));
+  const riskGaps=highRisk.filter(r=>!readySet.has(r.id));
+  const gaps=fr.filter(r=>!slateSet.has(r.id));
+  if(!fr.length){el('mainView').innerHTML=emptyState('No roles to analyze','Open a CSV or clear the filters.');return}
+
+  const kpis=`<div class="kpis">
+    <div class="kpi"><b>${fr.length}</b><small>Roles in view</small></div>
+    <div class="kpi"><b>${pct(covered.length,fr.length)}%</b><small>Bench coverage</small><div class="sub">${covered.length} roles with &ge;1 candidate</div></div>
+    <div class="kpi"><b>${pct(readyCovered.length,fr.length)}%</b><small>Ready Now coverage</small><div class="sub">${readyCovered.length} roles with a Ready Now candidate</div></div>
+    <div class="kpi"><b>${vacant.length}</b><small>Vacant roles</small></div>
+    <div class="kpi"><b>${riskGaps.length}</b><small>High-risk gaps</small><div class="sub">high-risk roles with no Ready Now cover</div></div>
+  </div>`;
+
+  const byDept={};
+  fr.forEach(r=>{const d=r.department||'No department';(byDept[d]=byDept[d]||{total:0,covered:0}).total++;if(slateSet.has(r.id))byDept[d].covered++});
+  const deptRows=Object.entries(byDept).sort((a,b)=>b[1].total-a[1].total).slice(0,12).map(([d,x])=>
+    `<div class="barrow"><span class="lbl" title="${attr(d)}">${esc(d)}</span><span class="track"><span class="fill" style="width:${pct(x.covered,x.total)}%"></span></span><span class="val">${x.covered}/${x.total}</span></div>`).join('');
+
+  const byReady={};
+  ss.forEach(s=>{const k=s.readiness||'Unknown';byReady[k]=(byReady[k]||0)+1});
+  const maxReady=Math.max(1,...Object.values(byReady));
+  const readyRows=Object.entries(byReady).sort((a,b)=>readinessScore(a[0])-readinessScore(b[0])).map(([k,n])=>
+    `<div class="barrow"><span class="lbl">${esc(k)}</span><span class="track"><span class="fill ${norm(k)==='ready now'?'':'dim'}" style="width:${pct(n,maxReady)}%"></span></span><span class="val">${n}</span></div>`).join('');
+
+  const gapTable=list=>list.slice(0,30).map(r=>`<tr class="row-click" data-action="openRole" data-role-id="${attr(r.id)}"><td><b>${esc(r.title)}</b><div style="color:var(--muted);font-size:11px">${esc(r.id)}</div></td><td>${esc(r.level||'')}</td><td>${esc(r.department||'')}</td><td>${riskBadge(r.risk)}</td><td>${isRoleVacant(r)?'<span class="badge red">VACANT</span>':esc(personName(r.incumbentPersonId,r.incumbentName))}</td></tr>`).join('');
+
+  el('mainView').innerHTML=kpis+
+    `<div class="insight-grid">
+      <div class="insight-card"><h3>Bench coverage by department</h3>${deptRows||'<div class="hint">No data.</div>'}</div>
+      <div class="insight-card"><h3>Candidate readiness mix</h3>${readyRows||'<div class="hint">No slate rows.</div>'}</div>
+      <div class="insight-card full-card"><h3>Attention needed &mdash; ${plur(riskGaps.length,'high-risk role')} without Ready Now cover</h3>
+        ${riskGaps.length?`<div class="tablebox" style="border:0"><table class="table"><thead><tr><th>Role</th><th>Level</th><th>Department</th><th>Risk</th><th>Incumbent</th></tr></thead><tbody>${gapTable(riskGaps)}</tbody></table></div>`:'<div class="hint">Nothing urgent — every high-risk role has a Ready Now candidate.</div>'}
+      </div>
+      <div class="insight-card full-card"><h3>Roles with no candidates (${gaps.length})</h3>
+        ${gaps.length?`<div class="tablebox" style="border:0"><table class="table"><thead><tr><th>Role</th><th>Level</th><th>Department</th><th>Risk</th><th>Incumbent</th></tr></thead><tbody>${gapTable(gaps)}</tbody></table>${gaps.length>30?`<div class="tfoot-note">Showing 30 of ${gaps.length}.</div>`:''}</div>`:'<div class="hint">Every role in view has at least one candidate.</div>'}
+      </div>
+    </div>`;
+}
+
+/* ---------- sidebar ---------- */
+function renderPieceBox(){
+  const q=norm(v('pieceSearch')),d=v('pieceDept');
+  let html='';
+  if(selectedPersonId&&person(selectedPersonId)){
+    html+=`<div class="selected-banner"><span><b>${esc(personName(selectedPersonId))}</b> selected — use "+" on a role card</span><button class="icon-btn" data-action="clearSelection" title="Clear selection">&#10005;</button></div>`;
+  }
+  const list=people.filter(p=>[p.id,p.name,p.title,p.department,p.location,p.skills].join(' ').toLowerCase().includes(q)&&(d==='All Departments'||p.department===d));
+  html+=list.slice(0,PIECE_CAP).map(p=>`<div class="piece ${selectedPersonId===p.id?'selected':''}" draggable="true" data-drag="person" data-person-id="${attr(p.id)}" data-action="openPerson">
+      ${avatarHtml(p.name,30)}
+      <div style="min-width:0;flex:1">
+        <div class="piece-name">${esc(p.name)}</div>
+        <div class="piece-meta">${esc(p.title||'No title')}<br>${esc(p.department||'No dept')} · ${esc(p.location||'No location')}</div>
+        <div class="piece-actions">${readinessBadge(p.readiness)}<button class="btn btn-quiet btn-sm" data-action="selectPiece" data-person-id="${attr(p.id)}">Select</button></div>
+      </div>
+    </div>`).join('');
+  if(list.length>PIECE_CAP)html+=`<div class="hint" style="text-align:center">Showing ${PIECE_CAP} of ${list.length} — refine the search.</div>`;
+  el('pieceBox').innerHTML=html||'<div class="panel">No candidates match.</div>';
+}
+function renderApproved(){
+  const list=successors.filter(s=>s.approved);
+  el('approvedPanel').innerHTML=list.length?list.map(s=>`<div class="panel"><b>${esc(personName(s.personId))}</b> &rarr; ${esc(role(s.roleId)?.title||s.roleId)}<br><span class="hint">${esc(s.readiness||'')} · ${esc(s.candidateType||'')}</span></div>`).join(''):'<div class="panel">No approved moves yet.</div>';
+}
+function renderMessages(){
+  el('messagesPanel').innerHTML=messages.length
+    ?messages.slice(0,10).map(m=>`<div class="notice ${statusToast(m.type)}"><b>${esc(m.type)}</b><span>${esc(m.message)}</span></div>`).join('')
+    :'<div class="panel">No messages.</div>';
+  el('notices').innerHTML=messages.slice(0,2).map(m=>`<div class="notice ${statusToast(m.type)}">${esc(m.message)}</div>`).join('');
+}
+</script>
+<script>
+/* =====================================================================
+   Drawers & forms
+   ===================================================================== */
+function isDescendant(childId,ancestorId){let cur=role(childId);const seen=new Set();while(cur&&cur.managerRoleId){if(cur.managerRoleId===ancestorId)return true;if(seen.has(cur.managerRoleId))return false;seen.add(cur.managerRoleId);cur=role(cur.managerRoleId)}return false}
+function boardOptions(sel=''){const rows=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).map(b=>`<option value="${attr(b.id)}" ${b.id===sel?'selected':''}>${esc(b.name)}</option>`).join('');return '<option value="">No board (show in All Roles)</option>'+rows+'<option value="__ADD__">+ Add board/tab&hellip;</option>'}
+function roleOptions(sel=''){return '<option value="">No Manager / Root</option>'+roles.map(r=>`<option value="${attr(r.id)}" ${r.id===sel?'selected':''}>${esc(r.title)} (${esc(r.id)})</option>`).join('')+'<option value="__ADD__">+ Add new manager role&hellip;</option>'}
+function targetRoleOptions(sel=''){return '<option value=""></option>'+roles.map(r=>`<option value="${attr(r.id)}" ${r.id===sel?'selected':''}>${esc(r.title)} (${esc(r.id)})</option>`).join('')}
+function personOptions(sel=''){return '<option value="">VACANT</option>'+people.map(p=>`<option value="${attr(p.id)}" ${p.id===sel?'selected':''}>${esc(p.name)} (${esc(p.id)})</option>`).join('')}
+function rulePersonOptions(sel=''){return '<option value=""></option>'+people.map(p=>`<option value="${attr(p.id)}" ${p.id===sel?'selected':''}>${esc(p.name)} (${esc(p.id)})</option>`).join('')}
+
+function openAddChooser(){
+  openDrawer('Add to the plan','Choose the record type.',
+    `<div class="choice-grid">
+      <div class="choice-card"><h3>Role / Employee</h3><div class="hint">Add a role or position with its current incumbent. Roles appear on boards and in the org tree.</div><div style="margin-top:12px"><button class="btn btn-primary" data-action="openRoleDrawerNew">Add Role / Employee</button></div></div>
+      <div class="choice-card"><h3>Candidate / Successor</h3><div class="hint">Add a successor, athlete, or market candidate. Candidates live in the Candidate Box and can be dragged onto roles.</div><div style="margin-top:12px"><button class="btn btn-green" data-action="openPersonDrawerNew">Add Candidate / Successor</button></div></div>
+    </div>`,
+    ()=>closeDrawer(),'');
+  el('drawerSave').style.display='none';
+}
+
+/* ---------- person drawer ---------- */
+function personForm(p){
+  return `<div class="form-note"><b>One person, one record.</b> Edits update everywhere this Person ID appears — slates, incumbencies and rules.</div>
+  <div class="grid">
+    <div><label>Person ID *</label><input id="pId" value="${attr(p.id)}"></div>
+    <div><label>Name *</label><input id="pName" value="${attr(p.name)}"></div>
+    <div><label>Current Title</label><input id="pTitle" value="${attr(p.title)}"></div>
+    <div><label>Department</label><select id="pDept" data-change="customSelect">${customSelectOptions([],p.department,'department')}</select></div>
+    <div><label>Email / Employee ID</label><input id="pEmail" value="${attr(p.email)}"></div>
+    <div><label>Location</label><select id="pLoc" data-change="customSelect">${customSelectOptions([],p.location,'location')}</select></div>
+    <div><label>Job Level</label><select id="pJob" data-change="customSelect">${customSelectOptions(DEFAULT_LEVELS,p.jobLevel,'jobLevel')}</select></div>
+    <div><label>Readiness</label><select id="pReady" data-change="customSelect">${customSelectOptions(['Ready Now','1-2 Years','3-5 Years'],p.readiness,'readiness')}</select></div>
+    <div><label>Source</label><select id="pSource" data-change="customSelect">${customSelectOptions(['Internal','External'],p.source,'source')}</select></div>
+    <div><label>Candidate Type</label><select id="pType" data-change="customSelect">${customSelectOptions(['Employee / Incumbent','Successor','Athlete','Market Candidate'],p.candidateType,'candidateType')}</select></div>
+    <div><label>Performance</label><select id="pPerf" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],p.performance,'performance')}</select></div>
+    <div><label>Potential</label><select id="pPot" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],p.potential,'potential')}</select></div>
+    <div><label>Retention Risk</label><select id="pRet" data-change="customSelect">${customSelectOptions(['Low','Medium','High'],p.retentionRisk,'retentionRisk')}</select></div>
+    <div><label>Mobility</label><select id="pMob" data-change="customSelect">${customSelectOptions(['Yes','No','Unknown'],p.mobility,'mobility')}</select></div>
+    <div><label>Confidence</label><select id="pConf" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],p.confidence,'confidence')}</select></div>
+    <div class="full"><label>Critical Experience</label><input id="pExp" value="${attr(p.criticalExperience)}"></div>
+    <div class="full"><label>Skills</label><input id="pSkills" value="${attr(p.skills)}"></div>
+    <div class="full"><label>Notes</label><textarea id="pNotes">${esc(p.notes)}</textarea></div>
+  </div>`;
+}
+function personSlateSection(pid){
+  const cur=currentRoleForPerson(pid);
+  const slates=successors.filter(s=>s.personId===pid).sort((a,b)=>(+a.ranking||999)-(+b.ranking||999));
+  let html=`<div class="drawer-section-title">Where this person appears</div>`;
+  html+=`<div class="panel">${cur?`Current incumbent of <b>${esc(cur.title)}</b> (${esc(cur.id)})`:'Not currently an incumbent of any role.'}</div>`;
+  html+=slates.length?slates.map(s=>{
+    const r=role(s.roleId);
+    return `<div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span>#${esc(s.ranking)} on <b>${esc(r?.title||s.roleId)}</b> · ${esc(s.readiness||'')}${s.approved?' · <span class="badge green">Approved</span>':''}${s.autoMoveQueued?' · <span class="badge amber">Queued</span>':''}</span><span style="display:flex;gap:6px"><button class="btn btn-quiet btn-sm" data-action="openRole" data-role-id="${attr(s.roleId)}">Open role</button><button class="btn btn-danger btn-sm" data-action="personSlateRemove" data-succ-id="${attr(s.id)}" data-person-id="${attr(pid)}">Remove</button></span></div>`;
+  }).join(''):'<div class="hint" style="margin-bottom:6px">Not on any succession slate yet — drag them onto a role from the Candidate Box.</div>';
+  return html;
+}
+function openPersonDrawer(id='',fromRole='',defaultType='Successor'){
+  currentDrawerPersonId=id||'';
+  const p=id?person(id):{id:uid('P'),name:'',title:'',department:'',email:'',location:'',jobLevel:'',readiness:'1-2 Years',source:'Internal',candidateType:defaultType,performance:'Medium',potential:'Medium',retentionRisk:'Low',mobility:'Unknown',confidence:'Medium',criticalExperience:'',skills:'',notes:''};
+  if(id&&!p){notice('ERR','Person not found: '+id);return}
+  backRoleId=fromRole||'';
+  openDrawer(id?p.name:'Add Employee / Candidate',id?`${p.title||'No title'} · ${p.id}`:'Candidate details drive rules and slate placement.',
+    personForm(p)+(id?personSlateSection(id):''),
+    ()=>savePerson(id),
+    (id?`<button type="button" class="btn btn-danger" data-action="deletePerson" data-person-id="${attr(id)}">Delete Person</button>`:'')+`<button type="button" class="btn btn-quiet" data-action="openRoleDrawerNew">Add Role</button>`,
+    !!fromRole);
+}
+function renamePersonRefs(oldId,newId){
+  successors.forEach(s=>{if(s.personId===oldId)s.personId=newId});
+  roles.forEach(r=>{if(r.incumbentPersonId===oldId)r.incumbentPersonId=newId});
+  rules.forEach(r=>{
+    if(r.personId===oldId)r.personId=newId;
+    if(r.altPersonId===oldId)r.altPersonId=newId;
+    if(r.type==='AUTO_BACKFILL'){const cfg=safeJSON(r.value,null);if(cfg&&Array.isArray(cfg.customMappings)){let hit=false;cfg.customMappings.forEach(m=>{if(m.personId===oldId){m.personId=newId;hit=true}});if(hit)r.value=JSON.stringify(cfg)}}
+  });
+  if(selectedPersonId===oldId)selectedPersonId=newId;
+  if(importBaseline){importBaseline.successors.forEach(s=>{if(s.personId===oldId)s.personId=newId});importBaseline.roles.forEach(r=>{if(r.incumbentPersonId===oldId)r.incumbentPersonId=newId})}
+}
+function savePerson(oldId=''){
+  const id=v('pId').trim(),name=v('pName').trim();
+  if(!id||!name){notice('ERR','Person ID and Name are required.');return}
+  if(id!==oldId&&person(id)){notice('ERR',`Person ID "${id}" is already used by ${personName(id)}. Pick a unique ID.`);return}
+  pushUndo(oldId?'Update employee/candidate':'Add employee/candidate');
+  const val=x=>v(x)==='__ADD__'?'':v(x);
+  const obj={id,name,title:v('pTitle'),department:val('pDept'),email:v('pEmail'),location:val('pLoc'),jobLevel:val('pJob'),readiness:val('pReady'),source:val('pSource'),candidateType:val('pType'),performance:val('pPerf'),potential:val('pPot'),retentionRisk:val('pRet'),mobility:val('pMob'),confidence:val('pConf'),criticalExperience:v('pExp'),skills:v('pSkills'),notes:v('pNotes')};
+  const ix=oldId?people.findIndex(p=>p.id===oldId):-1;
+  if(ix>=0){people[ix]=obj;if(oldId!==id)renamePersonRefs(oldId,id)}else people.push(obj);
+  roles.forEach(r=>{if(r.incumbentPersonId===id)r.incumbentName=name});
+  log('Candidate Saved',`${name} (${id}) saved`);
+  notice('OK',`${name} saved.`);
+  closeDrawer();render();
+}
+function deletePerson(id){
+  if(!confirm('Delete this person and remove them from all slates?'))return;
+  pushUndo('Delete candidate');
+  const name=personName(id,id);
+  people=people.filter(p=>p.id!==id);
+  const affected=new Set(successors.filter(s=>s.personId===id).map(s=>s.roleId));
+  successors=successors.filter(s=>s.personId!==id);
+  affected.forEach(rid=>normalizeRanks(rid));
+  roles.forEach(r=>{if(r.incumbentPersonId===id){r.incumbentPersonId='';r.incumbentName='VACANT'}});
+  if(selectedPersonId===id)selectedPersonId='';
+  currentDrawerPersonId='';
+  log('Candidate Deleted',`${name} deleted`);
+  notice('OK',`${name} deleted.`);
+  closeDrawer();render();
+}
+
+/* ---------- role drawer ---------- */
+function openRoleDrawer(id=''){
+  const r=id?role(id):{id:uid('R'),title:'',level:'VP',department:'',boardId:'',managerRoleId:'',incumbentPersonId:'',incumbentName:'VACANT',risk:'Medium',criticality:'High',owner:'',status:'Active Plan',sortOrder:roles.length+1};
+  if(id&&!r){notice('ERR','Role not found: '+id);return}
+  const slate=slateFor(r.id).map(s=>`<div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>#${esc(s.ranking)} ${s.autoMoveQueued?'&#9889; ':''}${s.approved?'&#10003; ':''}<b>${esc(personName(s.personId))}</b> · ${esc(s.readiness||'')} · ${esc(s.candidateType||'')}</span>
+      <span style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="btn btn-quiet btn-sm" data-action="openPersonFromSlate" data-person-id="${attr(s.personId)}" data-succ-id="${attr(s.id)}">Open</button>
+        <button class="icon-btn" data-action="drawerRank" data-succ-id="${attr(s.id)}" data-role-id="${attr(r.id)}" data-delta="-1" title="Move up">&#8593;</button>
+        <button class="icon-btn" data-action="drawerRank" data-succ-id="${attr(s.id)}" data-role-id="${attr(r.id)}" data-delta="1" title="Move down">&#8595;</button>
+        <button class="btn btn-quiet btn-sm" data-action="drawerAuto" data-succ-id="${attr(s.id)}" data-role-id="${attr(r.id)}">Auto</button>
+        <button class="btn btn-quiet btn-sm" data-action="drawerApprove" data-succ-id="${attr(s.id)}" data-role-id="${attr(r.id)}">Approve</button>
+        <button class="btn btn-danger btn-sm" data-action="drawerRemoveSucc" data-succ-id="${attr(s.id)}" data-role-id="${attr(r.id)}">Remove</button>
+      </span>
+    </div>`).join('')||'<div class="hint">No candidates yet. Drag one from the Candidate Box, or use Add Candidate below.</div>';
+  openDrawer(id?(r.title||'Role'):'Add Role',id?`${r.level||''}${r.department?' · '+r.department:''} · ${r.id}`:'Use Manager Role to control the org tree. Boards/tabs can be added here too.',
+    `<div class="grid">
+      <div><label>Role ID *</label><input id="rId" value="${attr(r.id)}"></div>
+      <div><label>Role Title *</label><input id="rTitle" value="${attr(r.title)}"></div>
+      <div><label>Level</label><select id="rLevel" data-change="customSelect">${customSelectOptions(DEFAULT_LEVELS,r.level,'level')}</select></div>
+      <div><label>Department</label><select id="rDept" data-change="customSelect">${customSelectOptions([],r.department,'department')}</select></div>
+      <div><label>Board / Tab</label><select id="rBoard" data-change="customSelect">${boardOptions(r.boardId)}</select></div>
+      <div><label>Manager Role</label><select id="rManager" data-change="customSelect">${roleOptions(r.managerRoleId)}</select></div>
+      <div><label>Current Person</label><select id="rInc">${personOptions(r.incumbentPersonId)}</select></div>
+      <div><label>Risk</label><select id="rRisk" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],r.risk,'risk')}</select></div>
+      <div><label>Criticality</label><select id="rCrit" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],r.criticality,'criticality')}</select></div>
+      <div><label>Owner</label><input id="rOwner" value="${attr(r.owner)}"></div>
+      <div><label>Status</label><input id="rStatus" value="${attr(r.status)}"></div>
+      <div><label>Sort Order</label><input id="rSort" type="number" value="${attr(r.sortOrder)}"></div>
+    </div>
+    <div class="drawer-section-title">Candidate Slate</div>${slate}`,
+    ()=>saveRole(id),
+    id?`<button class="btn btn-danger" data-action="deleteRole" data-role-id="${attr(id)}">Delete Role</button> <button class="btn btn-green" data-action="addCandidateFromRole" data-role-id="${attr(id)}">Add Candidate</button>`
+      :`<button class="btn btn-green" data-action="addCandidateFromRole">Add Candidate</button>`);
+}
+function renameRoleRefs(oldId,newId){
+  successors.forEach(s=>{if(s.roleId===oldId)s.roleId=newId});
+  roles.forEach(r=>{if(r.managerRoleId===oldId)r.managerRoleId=newId});
+  rules.forEach(r=>{
+    if(r.targetRoleId===oldId)r.targetRoleId=newId;
+    if(r.type==='AUTO_BACKFILL'){const cfg=safeJSON(r.value,null);if(cfg&&Array.isArray(cfg.customMappings)){let hit=false;cfg.customMappings.forEach(m=>{if(m.roleId===oldId){m.roleId=newId;hit=true}});if(hit)r.value=JSON.stringify(cfg)}}
+  });
+  if(importBaseline){importBaseline.successors.forEach(s=>{if(s.roleId===oldId)s.roleId=newId});importBaseline.roles.forEach(r=>{if(r.id===oldId)r.id=newId;if(r.managerRoleId===oldId)r.managerRoleId=newId})}
+}
+function saveRole(oldId=''){
+  const id=v('rId').trim(),title=v('rTitle').trim();
+  if(!id||!title){notice('ERR','Role ID and Role Title are required.');return}
+  if(id!==oldId&&role(id)){notice('ERR',`Role ID "${id}" is already used by ${role(id).title}. Pick a unique ID.`);return}
+  if(v('rManager')==='__ADD__'){notice('ERR','Please add/select a manager role before saving.');return}
+  const managerId=v('rManager');
+  if(managerId&&oldId&&(managerId===oldId||isDescendant(managerId,oldId))){notice('ERR','That manager would create a circular reporting line.');return}
+  if(managerId&&managerId===id){notice('ERR','A role cannot report to itself.');return}
+  pushUndo(oldId?'Update role':'Add role');
+  const val=x=>v(x)==='__ADD__'?'':v(x);
+  const inc=v('rInc');
+  const obj={id,title,level:val('rLevel')||'VP',department:val('rDept'),boardId:val('rBoard'),managerRoleId:managerId,incumbentPersonId:inc,incumbentName:inc?personName(inc):'VACANT',risk:val('rRisk'),criticality:val('rCrit'),owner:v('rOwner'),status:v('rStatus'),sortOrder:Number(v('rSort')||999)};
+  const ix=oldId?roles.findIndex(r=>r.id===oldId):-1;
+  if(ix>=0){roles[ix]=obj;if(oldId!==id)renameRoleRefs(oldId,id)}else roles.push(obj);
+  log('Role Saved',`${title} (${id}) saved`);
+  notice('OK',`${title} saved.`);
+  closeDrawer();render();
+}
+function deleteRole(id){
+  if(!confirm('Delete this role and all of its slate entries?'))return;
+  pushUndo('Delete role');
+  const title=role(id)?.title||id;
+  roles=roles.filter(r=>r.id!==id);
+  successors=successors.filter(s=>s.roleId!==id);
+  roles.forEach(r=>{if(r.managerRoleId===id)r.managerRoleId=''});
+  log('Role Deleted',title);
+  notice('OK',`${title} deleted.`);
+  closeDrawer();render();
+}
+
+/* ---------- rule drawer ---------- */
+function fieldOptions(selected=''){return CANDIDATE_FIELDS.map(f=>`<option ${f===selected?'selected':''}>${f}</option>`).join('')}
+function selectedValues(value){return String(value||'').split('|').filter(Boolean)}
+function checkboxId(){return 'cb-'+Math.random().toString(36).slice(2,9)}
+function valueSelectForField(field,selected=''){
+  let vals=valuesForField(field,[]);
+  if(selected&&!vals.includes(selected))vals.unshift(selected);
+  if(!vals.length)vals=[''];
+  return `<select class="condValueSelect">${vals.map(x=>`<option value="${attr(x)}" ${x===selected?'selected':''}>${esc(x||'-- no values yet --')}</option>`).join('')}<option value="__ADD__">+ Add value&hellip;</option></select>`;
+}
+function valueTextForField(field,selected=''){
+  const listId='dl-'+checkboxId();
+  return `<input class="condValueText" value="${attr(selectedValues(selected)[0]||selected||'')}" placeholder="Text to match&hellip;" list="${listId}"><datalist id="${listId}">${valuesForField(field,[]).map(x=>`<option value="${attr(x)}">`).join('')}</datalist>`;
+}
+function valueCheckboxesForField(field,selected=''){
+  let vals=valuesForField(field,[]);const sel=selectedValues(selected);
+  sel.forEach(x=>{if(!vals.includes(x))vals.unshift(x)});
+  if(!vals.length)vals=[''];
+  const allId=checkboxId();
+  const boxes=vals.map(x=>{const bid=checkboxId();return `<label for="${bid}"><input id="${bid}" type="checkbox" class="condValCheck" value="${attr(x)}" ${sel.includes(x)?'checked':''}>${esc(x||'-- no values yet --')}</label>`}).join('');
+  return `<div class="value-picker"><label class="select-all" for="${allId}"><input id="${allId}" type="checkbox" class="selAll" ${vals.length&&vals.every(x=>sel.includes(x))?'checked':''}>Select all</label>${boxes}<button type="button" class="btn btn-quiet btn-sm" data-action="addCheckboxValue" style="margin-top:6px">+ Add value</button></div>`;
+}
+function valueControlForCondition(field,op,selected=''){
+  if(op==='list')return valueCheckboxesForField(field,selected);
+  if(TEXT_OPERATORS.includes(op))return valueTextForField(field,selected);
+  return valueSelectForField(field,selectedValues(selected)[0]||selected);
+}
+function updateConditionValue(elm){
+  const row=elm.closest('.condition-row');
+  const field=row.querySelector('.condField').value,op=row.querySelector('.condOperator').value;
+  const current=getConditionValues(row);
+  row.querySelector('.condValueBox').innerHTML=valueControlForCondition(field,op,current);
+}
+function getConditionValues(row){
+  const op=row.querySelector('.condOperator')?.value||'equals';
+  if(op==='list')return[...row.querySelectorAll('.condValCheck')].filter(x=>x.checked).map(x=>x.value).join('|');
+  if(TEXT_OPERATORS.includes(op))return row.querySelector('.condValueText')?.value||'';
+  return row.querySelector('.condValueSelect')?.value||'';
+}
+function toggleAllCondValues(box){box.closest('.value-picker').querySelectorAll('.condValCheck').forEach(cb=>cb.checked=box.checked)}
+function addRuleCheckboxValue(btn){
+  const row=btn.closest('.condition-row'),field=row.querySelector('.condField').value;
+  openSmallValueBox('Add rule value',value=>{
+    addCustomValue(field,value);markDirty();
+    const current=getConditionValues(row);
+    row.querySelector('.condValueBox').innerHTML=valueControlForCondition(field,row.querySelector('.condOperator').value,current?current+'|'+value:value);
+  });
+}
+function handleRuleValueSelect(sel){
+  if(sel.value!=='__ADD__'){sel.dataset.previous=sel.value;return}
+  const row=sel.closest('.condition-row'),field=row.querySelector('.condField').value;
+  const prev=sel.dataset.previous||sel.options[0]?.value||'';
+  openSmallValueBox('Add rule value',value=>{
+    addCustomValue(field,value);markDirty();
+    const opt=document.createElement('option');opt.value=value;opt.textContent=value;
+    sel.insertBefore(opt,sel.querySelector('option[value="__ADD__"]'));
+    sel.value=value;sel.dataset.previous=value;
+  });
+  sel.value=prev;
+}
+function conditionRowHtml(c={field:'readiness',operator:'equals',value:'Ready Now'}){
+  const op=c.operator==='in list'?'list':(c.operator||'equals');
+  const opOpt=(val,label)=>`<option value="${val}" ${op===val?'selected':''}>${label}</option>`;
+  return `<div class="condition-row">
+    <div><label>Candidate Field</label><select class="condField">${fieldOptions(c.field)}</select></div>
+    <div><label>Operator</label><select class="condOperator">${opOpt('equals','equal to')+opOpt('not equals','not equal to')+opOpt('contains','contains')+opOpt('not contains','does not contain')+opOpt('list','any of (list)')}</select></div>
+    <div><label>Value</label><div class="condValueBox">${valueControlForCondition(c.field,op,c.value||'')}</div></div>
+    <button class="btn btn-danger btn-sm" type="button" data-action="removeParent" data-target=".condition-row" style="align-self:end">Remove</button>
+  </div>`;
+}
+function addConditionRow(c){el('conditionRows').insertAdjacentHTML('beforeend',conditionRowHtml(c))}
+function customMapRowHtml(m={roleId:'',personId:''}){
+  return `<div class="custom-map-row">
+    <div><label>When Role Is Vacant</label><select class="customRole">${targetRoleOptions(m.roleId)}</select></div>
+    <div><label>Auto Fill With Person</label><select class="customPerson">${rulePersonOptions(m.personId)}</select></div>
+    <div class="hint" style="align-self:center">Role-to-person backfill</div>
+    <button class="btn btn-danger btn-sm" type="button" data-action="removeParent" data-target=".custom-map-row" style="align-self:end">Remove</button>
+  </div>`;
+}
+function addCustomMapRow(m){el('customMapRows').insertAdjacentHTML('beforeend',customMapRowHtml(m))}
+function updateRuleTypeUI(){
+  const type=v('ruleType');
+  ['blockSection','fieldSection','autoSection'].forEach(x=>el(x)?.classList.add('hidden'));
+  if(type==='BLOCK')el('blockSection')?.classList.remove('hidden');
+  if(type==='FIELD_RULE')el('fieldSection')?.classList.remove('hidden');
+  if(type==='AUTO_BACKFILL')el('autoSection')?.classList.remove('hidden');
+  updateBlockTargetUI();updateAutoCustomUI();
+}
+function updateBlockTargetUI(){const op=v('ruleBlockOperator');el('targetRoleBox')?.classList.toggle('hidden',op==='cannot change role')}
+function updateAutoCustomUI(){const val=v('autoTypeSelect');el('customAutoBox')?.classList.toggle('hidden',val!=='Custom')}
+function openRuleDrawer(id=''){
+  const r=id?rules.find(x=>x.id===id):{id:uid('RULE'),name:'',type:'FIELD_RULE',scope:'Candidate',field:'readiness',operator:'equals',value:'Ready Now',personId:'',targetRoleId:'',severity:'Block',message:'',enabled:true};
+  if(id&&!r){notice('ERR','Rule not found: '+id);return}
+  let conds=ruleConditions(r);
+  if(!conds.length)conds=[{field:r.field||'readiness',operator:r.operator||'equals',value:r.value||'Ready Now'}];
+  const cfg=autoRuleConfig(r),autoTypes=cfg.autoTypes||[],customMappings=cfg.customMappings||[],type=r.type||'FIELD_RULE';
+  const autoTypeOptions=[...new Set([...valuesForField('candidateType',['Successor','Athlete','Market Candidate']),'Custom'])];
+  const autoSel=autoTypes[0]||(cfg.mode==='custom'?'Custom':'');
+  const html=`<div class="grid">
+    <div><label>Rule ID</label><input id="ruleId" value="${attr(r.id)}"></div>
+    <div><label>Rule Name</label><input id="ruleName" value="${attr(r.name)}" placeholder="Optional — auto-filled if blank"></div>
+    <div><label>Rule Type</label><select id="ruleType"><option value="FIELD_RULE" ${type==='FIELD_RULE'?'selected':''}>Candidate field rule</option><option value="BLOCK" ${type==='BLOCK'?'selected':''}>Block a person&rsquo;s move</option><option value="AUTO_BACKFILL" ${type==='AUTO_BACKFILL'?'selected':''}>Auto backfill vacancies</option></select></div>
+    <div><label>Severity</label><select id="ruleSeverity"><option ${r.severity==='Block'?'selected':''}>Block</option><option ${r.severity==='Needs Review'?'selected':''}>Needs Review</option></select></div>
+    <div><label>Enabled</label><select id="ruleEnabled"><option ${r.enabled?'selected':''}>true</option><option ${!r.enabled?'selected':''}>false</option></select></div>
+    <div class="full"><label>Callout Message</label><textarea id="ruleMsg" placeholder="Shown when the rule fires">${esc(r.message)}</textarea></div>
+  </div>
+  <div id="blockSection" class="rule-section"><h3>Block Rule</h3><div class="hint" style="margin-bottom:8px">Stop a specific person from being approved or auto-moved.</div><div class="grid">
+    <div><label>Person</label><select id="rulePerson">${rulePersonOptions(r.personId)}</select></div>
+    <div><label>Operator</label><select id="ruleBlockOperator"><option value="cannot move to target role" ${r.operator!=='cannot change role'?'selected':''}>cannot move to target role</option><option value="cannot change role" ${r.operator==='cannot change role'?'selected':''}>cannot change role</option></select></div>
+    <div id="targetRoleBox"><label>Target Role</label><select id="ruleTarget">${targetRoleOptions(r.targetRoleId)}</select></div>
+  </div></div>
+  <div id="fieldSection" class="rule-section"><h3>Candidate Conditions</h3><div class="hint" style="margin-bottom:8px">All conditions must match for the rule to fire. Equal / not equal use a dropdown, contains matches partial text, list uses Excel-style checkboxes. Added values are saved in the CSV for reuse.</div>
+    <div id="conditionRows">${conds.map(c=>conditionRowHtml(c)).join('')}</div>
+    <button type="button" class="btn btn-green btn-sm" data-action="addConditionRow">+ Add Condition</button>
+  </div>
+  <div id="autoSection" class="rule-section"><h3>Auto Backfill Rule</h3><div class="hint" style="margin-bottom:8px">When a role becomes vacant, the top-ranked slate candidate of this type is auto-moved in. Choose Custom for explicit role-to-person mappings.</div>
+    <div style="max-width:320px"><label>Auto Fill From Candidate Type</label><select id="autoTypeSelect">${autoTypeOptions.map(t=>`<option ${t===autoSel?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
+    <div id="customAutoBox" style="margin-top:10px"><h3>Custom Auto Fill Chart</h3><div id="customMapRows">${customMappings.map(m=>customMapRowHtml(m)).join('')}</div><button type="button" class="btn btn-green btn-sm" data-action="addCustomMapRow">+ Add Custom Row</button></div>
+  </div>`;
+  openDrawer(id?(r.name||'Rule'):'Add Rule','Rules run on Approve and Auto Move. Priority: Block / Field rules → Auto Backfill → Auto Move queue.',html,()=>saveRule(id),
+    id?`<button class="btn btn-danger" data-action="deleteRule" data-rule-id="${attr(id)}">Delete Rule</button>`:'');
+  updateRuleTypeUI();
+}
+function saveRule(oldId=''){
+  const type=v('ruleType');
+  const r={id:v('ruleId').trim()||uid('RULE'),name:v('ruleName'),type,scope:'Candidate',field:'',operator:'',value:'',personId:v('rulePerson'),targetRoleId:v('ruleTarget'),altPersonId:'',severity:v('ruleSeverity')||'Block',message:v('ruleMsg'),enabled:v('ruleEnabled')==='true'};
+  if(r.id!==oldId&&rules.some(x=>x.id===r.id)){notice('ERR',`Rule ID "${r.id}" already exists.`);return}
+  const missing=[];
+  if(!r.name)r.name=type==='FIELD_RULE'?'Candidate Field Rule':type==='BLOCK'?'Person Movement Block Rule':'Auto Backfill Rule';
+  if(!r.message)r.message=`${r.name} triggered.`;
+  if(type==='BLOCK'){
+    r.severity='Block';
+    r.operator=v('ruleBlockOperator')||'cannot move to target role';
+    if(!r.personId)missing.push('Person');
+    if(r.operator==='cannot move to target role'&&!r.targetRoleId)missing.push('Target Role');
+    if(r.operator==='cannot change role')r.targetRoleId='';
+  }
+  if(type==='FIELD_RULE'){
+    const conds=[...document.querySelectorAll('#conditionRows .condition-row')].map(row=>({field:row.querySelector('.condField')?.value||'',operator:row.querySelector('.condOperator')?.value||'',value:getConditionValues(row)})).filter(c=>c.field&&c.operator&&c.value);
+    if(!conds.length)missing.push('At least one condition with a value');
+    r.field=conds[0]?.field||'';r.operator=conds[0]?.operator||'';r.value=JSON.stringify(conds);
+    r.personId='';r.targetRoleId='';
+  }
+  if(type==='AUTO_BACKFILL'){
+    const autoType=v('autoTypeSelect');
+    const autoTypes=autoType&&autoType!=='Custom'?[autoType]:[];
+    const customMappings=[...document.querySelectorAll('#customMapRows .custom-map-row')].map(row=>({roleId:row.querySelector('.customRole')?.value||'',personId:row.querySelector('.customPerson')?.value||''})).filter(m=>m.roleId&&m.personId);
+    if(!autoType)missing.push('Candidate type');
+    if(autoType==='Custom'&&!customMappings.length)missing.push('At least one custom mapping row');
+    r.value=JSON.stringify({mode:autoType==='Custom'?'custom':'type',autoTypes,customMappings});
+    r.field='candidateType';r.operator='in list';r.personId='';r.targetRoleId='';
+  }
+  if(missing.length){notice('ERR','Missing required fields: '+missing.join(', '));return}
+  pushUndo(oldId?'Update rule':'Add rule');
+  const ix=rules.findIndex(x=>x.id===oldId||x.id===r.id);
+  if(ix>=0)rules[ix]=r;else rules.push(r);
+  log('Rule Saved',`${r.name} saved`);
+  notice('OK',`Rule saved: ${r.name}`);
+  activeTab='RULES';closeDrawer();render();
+}
+function deleteRule(id){
+  if(!confirm('Delete this rule?'))return;
+  pushUndo('Delete rule');
+  const name=rules.find(r=>r.id===id)?.name||id;
+  rules=rules.filter(r=>r.id!==id);
+  log('Rule Deleted',name);
+  notice('OK',`Rule deleted: ${name}`);
+  closeDrawer();render();
+}
+function toggleRule(id,on){
+  const r=rules.find(x=>x.id===id);if(!r)return;
+  pushUndo(on?'Enable rule':'Disable rule');
+  r.enabled=!!on;
+  log(on?'Rule Enabled':'Rule Disabled',r.name||r.id);
+  render();
+}
+
+/* ---------- manage tabs drawer ---------- */
+function tabRowHtml(b={id:'',name:''}){return `<div class="tab-row"><div><label>Board ID</label><input class="bId" value="${attr(b.id||uid('BOARD'))}"></div><div><label>Board Name</label><input class="bName" value="${attr(b.name||'New Tab')}"></div><button class="btn btn-danger btn-sm" type="button" data-action="removeParent" data-target=".tab-row" style="align-self:end">Remove</button></div>`}
+function addBoardRow(){el('boardRows').insertAdjacentHTML('beforeend',tabRowHtml({id:uid('BOARD'),name:'New Tab'}))}
+function openBoardDrawer(){
+  const rows=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).map(b=>tabRowHtml(b)).join('');
+  openDrawer('Manage Tabs','Board tabs group roles. A role joins a board via its Board/Tab field (or when the board name matches its department). Changes apply on Save.',
+    `<div id="boardRows">${rows||''}</div><button class="btn btn-green btn-sm" type="button" data-action="addBoardRow">+ Add Tab</button>`,
+    ()=>{
+      pushUndo('Update tabs');
+      const ids=[...document.querySelectorAll('#boardRows .bId')],names=[...document.querySelectorAll('#boardRows .bName')];
+      boards=systemBoards();
+      ids.forEach((x,i)=>{const bid=x.value.trim(),bnm=names[i].value.trim();if(bid&&bnm&&!boards.some(b=>b.id===bid))boards.push({id:bid,name:bnm})});
+      if(!boards.some(b=>b.id===activeTab))activeTab='MASTER';
+      log('Tabs Saved',`${boards.length-SYSTEM_TABS.length} custom tabs saved`);
+      notice('OK','Tabs updated.');
+      closeDrawer();render();
+    });
+}
+
+/* =====================================================================
+   Event delegation, keyboard, boot
+   ===================================================================== */
+const ACTIONS={
+  tab:d=>{activeTab=d.tabId;render()},
+  openCSV:()=>openCSV(),
+  saveCSV:()=>saveCSV(),
+  exportCSV:()=>exportCSV(),
+  addChooser:()=>openAddChooser(),
+  undo:()=>undoLastAction(),
+  toggleMenu:()=>el('moreMenu').classList.toggle('open'),
+  manageTabs:()=>{el('moreMenu').classList.remove('open');openBoardDrawer()},
+  resetOrg:()=>{el('moreMenu').classList.remove('open');resetOrgChanges()},
+  clearAll:()=>{el('moreMenu').classList.remove('open');clearAll()},
+  restoreBackup:()=>restoreBackup(),
+  dismissBanner:()=>{el('banner').innerHTML=''},
+  openRole:d=>openRoleDrawer(d.roleId),
+  openRoleDrawerNew:()=>openRoleDrawer(),
+  openPerson:d=>openPersonDrawer(d.personId),
+  openPersonDrawerNew:()=>openPersonDrawer('','','Successor'),
+  openPersonFromSlate:d=>{const s=successors.find(x=>x.id===d.succId);openPersonDrawer(d.personId,s?s.roleId:'')},
+  openRule:d=>openRuleDrawer(d.ruleId),
+  openRuleDrawerNew:()=>openRuleDrawer(),
+  selectPiece:d=>{selectedPersonId=d.personId;setStatus(personName(d.personId)+' selected — use “+” on a role card');render()},
+  clearSelection:()=>{selectedPersonId='';render()},
+  assignSelected:d=>{if(selectedPersonId)addSuccessor(selectedPersonId,d.roleId)},
+  approveTop:d=>approveTop(d.roleId),
+  approveSucc:d=>approveSuccessor(d.succId),
+  autoMove:d=>autoMove(d.succId),
+  rank:d=>moveRank(d.succId,+d.delta),
+  removeSucc:d=>removeSuccessor(d.succId),
+  closeDrawer:()=>closeDrawer(),
+  goBack:()=>goBack(),
+  deletePerson:d=>deletePerson(d.personId),
+  deleteRole:d=>deleteRole(d.roleId),
+  deleteRule:d=>deleteRule(d.ruleId),
+  addCandidateFromRole:d=>openPersonDrawer('',d.roleId||'','Successor'),
+  drawerRank:d=>{moveRank(d.succId,+d.delta);if(role(d.roleId))openRoleDrawer(d.roleId)},
+  drawerAuto:d=>{autoMove(d.succId);if(role(d.roleId))openRoleDrawer(d.roleId)},
+  drawerApprove:d=>{approveSuccessor(d.succId);if(role(d.roleId))openRoleDrawer(d.roleId)},
+  drawerRemoveSucc:d=>{removeSuccessor(d.succId);if(role(d.roleId))openRoleDrawer(d.roleId)},
+  personSlateRemove:d=>{removeSuccessor(d.succId);if(person(d.personId))openPersonDrawer(d.personId)},
+  addConditionRow:()=>addConditionRow(),
+  addCheckboxValue:(d,elm)=>addRuleCheckboxValue(elm),
+  addCustomMapRow:()=>addCustomMapRow(),
+  addBoardRow:()=>addBoardRow(),
+  removeParent:(d,elm)=>elm.closest(d.target)?.remove(),
+};
+document.addEventListener('click',e=>{
+  const elm=e.target.closest('[data-action]');
+  const menu=el('moreMenu');
+  if(menu.classList.contains('open')&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');
+  if(!elm)return;
+  const fn=ACTIONS[elm.dataset.action];
+  if(fn){e.preventDefault();fn(elm.dataset,elm,e)}
+});
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.dataset.change==='filter')return render();
+  if(t.dataset.change==='pieceFilter')return renderPieceBox();
+  if(t.dataset.change==='customSelect')return handleCustomSelect(t);
+  if(t.dataset.change==='ruleToggle')return toggleRule(t.dataset.ruleId,t.checked);
+  if(t.classList.contains('condField')||t.classList.contains('condOperator'))return updateConditionValue(t);
+  if(t.classList.contains('condValueSelect'))return handleRuleValueSelect(t);
+  if(t.classList.contains('selAll'))return toggleAllCondValues(t);
+  if(t.id==='ruleType')return updateRuleTypeUI();
+  if(t.id==='ruleBlockOperator')return updateBlockTargetUI();
+  if(t.id==='autoTypeSelect')return updateAutoCustomUI();
+});
+let searchTimer=null;
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(t.dataset.input==='render'){clearTimeout(searchTimer);searchTimer=setTimeout(render,140)}
+  if(t.dataset.input==='pieceBox'){clearTimeout(searchTimer);searchTimer=setTimeout(renderPieceBox,140)}
+});
+
+/* ---------- drag & drop ---------- */
+document.addEventListener('dragstart',e=>{
+  const elm=e.target.closest('[data-drag]');
+  if(!elm)return;
+  e.dataTransfer.effectAllowed='move';
+  if(elm.dataset.drag==='succ'){e.dataTransfer.setData('succId',elm.dataset.succId);e.dataTransfer.setData('personId',elm.dataset.personId)}
+  else if(elm.dataset.drag==='person')e.dataTransfer.setData('personId',elm.dataset.personId);
+});
+document.addEventListener('dragover',e=>{
+  if([...e.dataTransfer.types].includes('Files')){e.preventDefault();return}
+  const t=e.target.closest('[data-drop]');
+  if(t){e.preventDefault();t.classList.add('dragover')}
+});
+document.addEventListener('dragleave',e=>{
+  const t=e.target.closest('[data-drop]');
+  if(t)t.classList.remove('dragover');
+});
+document.addEventListener('drop',async e=>{
+  e.preventDefault();
+  document.querySelectorAll('.dragover').forEach(x=>x.classList.remove('dragover'));
+  if(e.dataTransfer.files&&e.dataTransfer.files.length){
+    const f=e.dataTransfer.files[0];
+    if(/\.csv$/i.test(f.name)){if(loadCSV(await f.text())){fileHandle=null;el('dbStatus').textContent=f.name+' (dropped — use Export to save changes)'}}
+    else notice('WARN','Only .csv files can be dropped here.');
+    return;
+  }
+  const t=e.target.closest('[data-drop]');
+  if(!t)return;
+  const succId=e.dataTransfer.getData('succId'),personId=e.dataTransfer.getData('personId');
+  if(t.dataset.drop==='succ'){
+    const target=successors.find(x=>x.id===t.dataset.succId);
+    if(!target)return;
+    if(succId)return reorderSuccessorBefore(succId,target.id);
+    if(personId)return addSuccessorBefore(personId,target.roleId,target.id);
+  }else if(t.dataset.drop==='role'){
+    if(succId)return moveSuccessorToRole(succId,t.dataset.roleId);
+    if(personId)return addSuccessor(personId,t.dataset.roleId);
+  }
+});
+
+/* ---------- keyboard ---------- */
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    const modal=el('smallValueModal');
+    if(modal){modal.remove();return}
+    if(el('moreMenu').classList.contains('open')){el('moreMenu').classList.remove('open');return}
+    if(drawerIsOpen())closeDrawer();
+    return;
+  }
+  const mod=e.ctrlKey||e.metaKey;
+  if(mod&&(e.key==='s'||e.key==='S')){e.preventDefault();saveCSV();return}
+  if(mod&&(e.key==='z'||e.key==='Z')){
+    const tag=(document.activeElement?.tagName||'').toLowerCase();
+    if(!['input','textarea','select'].includes(tag)&&!drawerIsOpen()){e.preventDefault();undoLastAction()}
+  }
+});
+window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
+el('drawer').addEventListener('mousedown',e=>{if(e.target.id==='drawer')closeDrawer()});
+
+/* ---------- test / automation hooks ---------- */
+window.__APP__={
+  get roles(){return roles},get people(){return people},get successors(){return successors},
+  get rules(){return rules},get history(){return history},get boards(){return boards},
+  get customFieldValues(){return customFieldValues},get activeTab(){return activeTab},set activeTab(x){activeTab=x},
+  get dirty(){return dirty},get undoDepth(){return undoStack.length},get messages(){return messages},
+  get selectedPersonId(){return selectedPersonId},set selectedPersonId(x){selectedPersonId=x},
+  loadCSV,toCSV,render,parseCSV,csvEsc,addSuccessor,addSuccessorBefore,reorderSuccessorBefore,moveSuccessorToRole,moveRank,removeSuccessor,
+  approveSuccessor,approveTop,autoMove,evaluateRules,undoLastAction,resetOrgChanges,clearAll,consolidateDuplicateData,validateDataLinks,
+  openPersonDrawer,savePerson,deletePerson,openRoleDrawer,saveRole,deleteRole,openRuleDrawer,saveRule,deleteRule,toggleRule,openBoardDrawer,
+  openAddChooser,closeDrawer,addCustomValue,valuesForField,handleCustomSelect,isRoleVacant,slateFor,normalizeRanks,runVacancyAutomation,
+};
+
+/* ---------- boot ---------- */
+render();
+checkBackup();
+setStatus('Ready — open your CSV database or add records.');
+</script>
+</body>
+</html>

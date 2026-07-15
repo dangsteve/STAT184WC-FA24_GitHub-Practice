@@ -1,0 +1,67 @@
+# Succession Planner — Stress Test Report
+
+**Result: 64 / 64 automated scenarios pass, zero console errors.**
+
+The suite (`tests/stress_test.cjs`) drives the real app in headless Chromium via
+Playwright — it clicks the actual buttons, opens the actual drawers, and fires real
+drag-and-drop events. After every mutation it re-serializes the database
+(`toCSV()`) and asserts the change is present in the CSV, then re-loads that CSV
+to prove nothing is lost. Run it with:
+
+```bash
+NODE_PATH=$(npm root -g) node tests/stress_test.cjs
+```
+
+## What was tested
+
+| # | Area | Scenarios |
+|---|------|-----------|
+| 1 | Boot & load | blank boot, 533-row dummy CSV load (150 people / 72 roles / 294 slate rows / 5 rules / 10 boards), byte-stable round-trip: `toCSV(loadCSV(toCSV()))` is identical |
+| 2 | Boards & filters | custom-board scoping, search, level / department / risk / readiness filters (each checked against independently computed counts) |
+| 3 | People CRUD | add via drawer with hostile input (quotes, commas, newlines, `<script>` tag), XSS check, exact round-trip of hostile fields, edit propagation to slates & incumbency, **person-ID rename migrates every reference**, duplicate-ID rejection, required-field validation, delete with confirm |
+| 4 | Role CRUD | add with quotes in title, **role-ID rename migrates slates / children / rules**, circular-manager rejection, delete cleans slates and repoints children |
+| 5 | Drag & drop | candidate → role (rank appended), duplicate rejection, pill → pill reorder (insert-before, ranks renumbered 1..n), pill → other role (approval reset), rank arrows incl. boundary no-ops, remove pill, select → quick-assign flow, dropping a .csv file onto the window |
+| 6 | Rules engine | RULE-001 blocks non-Ready-Now approval; clean approve moves incumbent, vacates old role, strips other slate rows, logs history — all verified in the CSV; Approve-Top-on-empty warns; auto-move queue on occupied role; vacancy triggers queue; BLOCK rule created through the drawer blocks the move; "cannot change role" variant; **operator matrix — equals / not equals / contains / not contains / list / multi-condition AND**; contains rule built through the UI; enable/disable switch changes behavior and persists; AUTO_BACKFILL by candidate type and by custom role→person mapping (both built through the drawer UI) |
+| 7 | Undo / reset / clear | 3-deep undo restores byte-identical state, empty-stack warning, Ctrl+Z, reset-org-changes returns roles+slates to the import baseline while keeping new people/rules, clear-all + undo, history persists through round-trip |
+| 8 | Tabs & custom values | add/rename/remove tabs via drawer (BOARD rows in CSV), role→board assignment, active-tab fallback, "+ Add value…" custom dropdown values persist in the SETTING row and appear in filters, inline manager-role creation from the role form |
+| 9 | Hostile data | duplicate people/slate rows consolidated (fields merged, best readiness kept, types joined, approved kept), dangling successor references flagged as ERR without crashing, empty/garbage/header-only CSV rejected with state untouched, approving a successor whose person record is missing |
+| 10 | Insights | KPI numbers cross-checked against independently computed coverage/vacancy values; respects the filter bar |
+| 11 | Safety nets | dirty-flag lifecycle, localStorage auto-backup written and restorable after reload, Escape/backdrop drawer close |
+| 12 | Scale | 3,000 people / 800 roles / 4,000 slate rows: load 281 ms, full board render 266 ms, serialize 849 ms, round-trip intact; capped tables stay responsive |
+
+## Bugs found by the tests and fixed
+
+1. **Drawer Save button died after using "+ Add"** — the add-chooser hid the Save
+   button and nothing restored it, so every later drawer save was unclickable.
+2. **Insights bars were invisible** — inline `<span>` fills ignore width/height;
+   made them block-level.
+3. **Quadratic render** — `levels()` was recomputed inside a per-role filter;
+   an 800-role render took 22.4 s. After hoisting + indexing person lookups it
+   takes 266 ms (~84× faster).
+
+## Latent bugs from v26 fixed during the rebuild
+
+- **Boot crash**: the original file throws `activeTab is not defined` on startup
+  (verified in-browser: zero tabs render until a CSV load happens to create the
+  global). The rebuild declares and initializes it.
+- **ID renames left dangling references**: renaming a person/role ID orphaned
+  slate rows, incumbencies, manager links and rule targets. Now all references
+  migrate, and colliding IDs are rejected instead of silently overwriting.
+- **Quote-injection in click handlers**: IDs/names containing `'` broke inline
+  `onclick="...'${id}'..."` handlers. All events now use `data-*` attributes with
+  delegated listeners; no user data is ever interpolated into JavaScript.
+- **RULE-005 never fired**: a BLOCK rule with no operator and no target role did
+  nothing. Loading now infers `cannot change role` (the only meaning such a rule
+  can have — and what its own name says).
+- **Custom risk/criticality values were saved under the wrong key**
+  (`rRisk` instead of `risk`), so they vanished from dropdowns on reload.
+- **Cancelling the file picker opened a second file dialog** (fall-through).
+- **Circular reporting lines** could be saved and could hang tree rendering;
+  now rejected on save, and the tree renderer is cycle-proof regardless.
+- **Automation loops**: a custom backfill mapping could ping-pong two people
+  between roles forever; cascades now stop after 25 steps with an error message.
+
+## Screenshots
+
+Captured by the suite from the running app: `screen_board.png`,
+`screen_insights.png`, `screen_tree.png`, `screen_rules.png`, `screen_drawer.png`.
