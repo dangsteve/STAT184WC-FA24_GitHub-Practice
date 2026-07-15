@@ -247,6 +247,46 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
 .modal{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow-lg);width:min(420px,92vw);padding:18px}
 .modal h3{font-size:15px;margin-bottom:6px}
 
+/* ---------- chess view ---------- */
+.chess-overlay{position:fixed;inset:0;z-index:90;background:var(--bg);overflow:auto;display:flex;flex-direction:column}
+.chess-head{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);padding:12px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.chess-head h2{font-size:17px;display:flex;align-items:center;gap:8px}
+.chess-head .glyph{font-size:22px;line-height:1}
+.chess-head .hint{flex:1;min-width:200px}
+.chess-body{padding:20px 22px 40px;max-width:1250px;margin:0 auto;width:100%}
+.chess-callouts{margin-bottom:14px}
+.throne-row{display:flex;justify-content:center;align-items:stretch;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.throne{width:min(320px,90vw);border:2px solid var(--line);border-radius:14px;background:linear-gradient(180deg,#fff,#f2f5f9);padding:16px;text-align:center;position:relative}
+.throne.vacant{border-style:dashed;border-color:var(--red-line)}
+.throne.staged{border-color:var(--green);background:linear-gradient(180deg,#fff,var(--green-bg))}
+.throne.dragover{outline:3px solid var(--primary);outline-offset:2px}
+.throne .king{font-size:52px;line-height:1;display:block}
+.throne .t-label{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.throne .t-name{font-size:15px;font-weight:700;margin-top:4px}
+.throne .t-sub{font-size:11.5px;color:var(--muted)}
+.steps-down{align-self:center;max-width:230px;background:var(--surface);border:1px dashed var(--line);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--muted)}
+.chess-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.square{padding:14px 12px;min-height:150px;border:1px solid var(--line2);cursor:grab;position:relative;display:flex;flex-direction:column;gap:2px}
+.square.alt{background:#eef1f6}
+.square:hover{background:var(--primary-50)}
+.square.dragover{outline:3px solid var(--primary);outline-offset:-3px;z-index:1}
+.square .pglyph{font-size:38px;line-height:1.1}
+.square .prank{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.square .pname{font-size:13px;font-weight:700;line-height:1.25;margin-top:2px}
+.square .pinfo{font-size:11px;color:var(--muted);line-height:1.45;margin-top:4px}
+.square .pinfo b{color:var(--ink);font-weight:600}
+.square .plink{position:absolute;top:8px;right:8px}
+.chess-empty{padding:40px;text-align:center;color:var(--muted)}
+.chess-fields-wrap{position:relative}
+.chess-fields-menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);width:280px;padding:12px;z-index:20}
+.chess-fields-menu label{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);font-weight:500;margin:5px 0;text-transform:none;letter-spacing:0}
+.chess-fields-menu input[type=checkbox]{width:auto}
+.chess-fields-menu .cf-head{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:6px}
+.pending-chip{background:var(--amber-bg);border:1px solid var(--amber-line);color:var(--amber);border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:650}
+.node.inferred{border-top-style:dashed}
+.node .ninf{font-size:9.5px;color:var(--faint);font-style:italic}
+.extra-fields{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-top:14px}
+.extra-fields .grid{margin-top:8px}
 .hidden{display:none!important}
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-thumb{background:#c4cede;border-radius:5px;border:2px solid transparent;background-clip:content-box}
@@ -282,6 +322,7 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
         <button class="btn btn-quiet" data-action="toggleMenu" title="More actions">&#8943;</button>
         <div class="menu" id="moreMenu">
           <button data-action="manageTabs">Manage tabs&hellip;</button>
+          <button data-action="downloadTemplate">Download starter template</button>
           <div class="sep"></div>
           <button data-action="resetOrg">Reset org changes to import</button>
           <button class="danger" data-action="clearAll">Clear all data&hellip;</button>
@@ -349,6 +390,7 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
     </div>
   </aside>
 </div>
+<div id="chessOverlay" class="chess-overlay hidden"></div>
 <div id="toasts"></div>
 <script>
 'use strict';
@@ -363,6 +405,8 @@ const SYSTEM_TABS=[{id:'MASTER',name:'Org Tree'},{id:'ALL',name:'All Roles'},{id
 const DEFAULT_LEVELS=['CEO','C-Suite','EVP','SVP','VP','Sr Director','Director','Senior Manager','Manager','Individual Contributor'];
 const CANDIDATE_FIELDS=['readiness','source','candidateType','confidence','location','jobLevel','performance','potential','retentionRisk','mobility','criticalExperience','skills','department'];
 const TEXT_OPERATORS=['contains','not contains'];
+const CHESS_DEFAULT_FIELDS=['title','readiness','candidateType'];
+const CHESS_PIECES=[['♛','Queen'],['♜','Rook'],['♝','Bishop'],['♞','Knight'],['♟','Pawn']];
 const BACKUP_KEY='succession_planner_backup_v1';
 const LIST_CAP=400;   // max table rows rendered at once
 const PIECE_CAP=200;  // max candidate cards rendered at once
@@ -370,6 +414,7 @@ const PIECE_CAP=200;  // max candidate cards rendered at once
 let boards=systemBoards(),roles=[],people=[],successors=[],rules=[],history=[],messages=[];
 let fileHandle=null,selectedPersonId='',backRoleId='',undoStack=[],importBaseline=null,currentDrawerPersonId='',customFieldValues={};
 let activeTab='MASTER',dirty=false,backupTimer=null,automationDepth=0;
+let chess=null,chessSessionFields=null,chessDefaultFields=null,lastInferred=null;
 
 function systemBoards(){return SYSTEM_TABS.map(t=>({id:t.id,name:t.name}))}
 function uid(p){return p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)}
@@ -590,14 +635,21 @@ function loadCSV(text){
   if(rows.length<2){notice('ERR','CSV appears empty or invalid — nothing was loaded.');return false}
   const headers=rows[0].map(h=>h.trim());
   if(!headers.includes('recordType')){notice('ERR','This does not look like a Succession Planner CSV (missing recordType column).');return false}
-  boards=systemBoards();roles=[];people=[];successors=[];rules=[];history=[];messages=[];customFieldValues={};
+  // columns this app doesn't know yet are preserved on each record and written back on save
+  const extraCols=headers.filter(h=>h&&!CSV_HEADERS.includes(h));
+  const grabExtras=o=>extraCols.length?Object.fromEntries(extraCols.map(h=>[h,o[h]||''])):undefined;
+  boards=systemBoards();roles=[];people=[];successors=[];rules=[];history=[];messages=[];customFieldValues={};chessDefaultFields=null;
   rows.slice(1).forEach(row=>{
     const o={};headers.forEach((h,i)=>o[h]=row[i]||'');
     if(!Object.values(o).some(x=>String(x).trim()))return;
-    if(o.recordType==='BOARD'&&o.boardId&&!boards.some(b=>b.id===o.boardId))boards.push({id:o.boardId,name:o.boardName||o.boardId});
-    if(o.recordType==='PERSON'&&o.personId)people.push({id:o.personId,name:o.personName,title:o.personTitle,department:o.personDepartment,email:o.personEmail,location:o.location,jobLevel:o.jobLevel,performance:o.performance,potential:o.potential,retentionRisk:o.retentionRisk,mobility:o.mobility,criticalExperience:o.criticalExperience,skills:o.skills,readiness:o.readiness||'1-2 Years',source:o.source||'Internal',candidateType:o.candidateType||'Successor',confidence:o.confidence||'Medium',notes:o.notes});
-    if(o.recordType==='ROLE'&&o.roleId)roles.push({id:o.roleId,title:o.roleTitle,level:o.level||'VP',department:o.department,boardId:o.boardId,managerRoleId:o.managerRoleId,incumbentPersonId:o.incumbentPersonId,incumbentName:o.incumbentName,risk:o.risk||'Medium',criticality:o.criticality||'High',owner:o.owner,status:o.status||'Active Plan',sortOrder:Number(o.sortOrder||999)});
-    if(o.recordType==='SUCCESSOR'&&o.successorRoleId&&o.personId)successors.push({id:o.roleId||uid('S'),roleId:o.successorRoleId,personId:o.personId,readiness:o.readiness||'1-2 Years',source:o.source||'Internal',candidateType:o.candidateType||'Successor',confidence:o.confidence||'Medium',ranking:Number(o.ranking||999),notes:o.notes,approved:String(o.approved).toLowerCase()==='true',autoMoveQueued:String(o.autoMoveQueued).toLowerCase()==='true'});
+    if(o.recordType==='BOARD'&&o.boardId&&!boards.some(b=>b.id===o.boardId))boards.push({id:o.boardId,name:o.boardName||prettyBoardName(o.boardId)});
+    if(o.recordType==='PERSON'&&o.personId)people.push({id:o.personId,name:o.personName,title:o.personTitle,department:o.personDepartment,email:o.personEmail,location:o.location,jobLevel:o.jobLevel,performance:o.performance,potential:o.potential,retentionRisk:o.retentionRisk,mobility:o.mobility,criticalExperience:o.criticalExperience,skills:o.skills,readiness:o.readiness||'1-2 Years',source:o.source||'Internal',candidateType:o.candidateType||'Successor',confidence:o.confidence||'Medium',notes:o.notes,_x:grabExtras(o)});
+    if(o.recordType==='ROLE'&&o.roleId){
+      roles.push({id:o.roleId,title:o.roleTitle,level:o.level||'VP',department:o.department,boardId:o.boardId,managerRoleId:o.managerRoleId,incumbentPersonId:o.incumbentPersonId,incumbentName:o.incumbentName,risk:o.risk||'Medium',criticality:o.criticality||'High',owner:o.owner,status:o.status||'Active Plan',sortOrder:Number(o.sortOrder||999),_x:grabExtras(o)});
+      // a role naming a board that has no BOARD row auto-creates the tab — HR can add tabs straight from the CSV
+      if(o.boardId&&!boards.some(b=>b.id===o.boardId))boards.push({id:o.boardId,name:prettyBoardName(o.boardId)});
+    }
+    if(o.recordType==='SUCCESSOR'&&o.successorRoleId&&o.personId)successors.push({id:o.roleId||uid('S'),roleId:o.successorRoleId,personId:o.personId,readiness:o.readiness||'1-2 Years',source:o.source||'Internal',candidateType:o.candidateType||'Successor',confidence:o.confidence||'Medium',ranking:Number(o.ranking||999),notes:o.notes,approved:String(o.approved).toLowerCase()==='true',autoMoveQueued:String(o.autoMoveQueued).toLowerCase()==='true',_x:grabExtras(o)});
     if(o.recordType==='RULE'&&o.ruleId){
       let op=o.ruleOperator;
       // a BLOCK rule with no operator and no target role can only mean "cannot change role"
@@ -606,6 +658,7 @@ function loadCSV(text){
     }
     if(o.recordType==='HISTORY'&&o.historyId)history.push({id:o.historyId,date:o.historyDate,action:o.historyAction,details:o.historyDetails});
     if(o.recordType==='SETTING'&&o.settingKey==='customFieldValues'){try{customFieldValues=JSON.parse(o.settingValue||'{}')||{}}catch(e){customFieldValues={}}}
+    if(o.recordType==='SETTING'&&o.settingKey==='chessFields'){try{const f=JSON.parse(o.settingValue||'null');if(Array.isArray(f))chessDefaultFields=f}catch(e){}}
   });
   consolidateDuplicateData(true);
   validateDataLinks();
@@ -615,18 +668,40 @@ function loadCSV(text){
   render();
   return true;
 }
+function extraColumnNames(){
+  const s=new Set();
+  [...people,...roles,...successors].forEach(e=>Object.keys(e._x||{}).forEach(k=>{if(k&&!CSV_HEADERS.includes(k))s.add(k)}));
+  return[...s].sort((a,b)=>a.localeCompare(b));
+}
+function prettyBoardName(id){return String(id||'').replace(/^BOARD[-_]?/i,'').replace(/[-_]+/g,' ').trim().toLowerCase().replace(/\b\w/g,c=>c.toUpperCase())||String(id)}
 function toCSV(){
   consolidateDuplicateData(false);
-  const rows=[CSV_HEADERS.join(',')];
-  const put=o=>rows.push(CSV_HEADERS.map(h=>csvEsc(o[h])).join(','));
+  const extras=extraColumnNames();
+  const headers=[...CSV_HEADERS,...extras];
+  const rows=[headers.map(csvEsc).join(',')];
+  const put=(o,x)=>rows.push(headers.map(h=>csvEsc(CSV_HEADERS.includes(h)?o[h]:(x||{})[h])).join(','));
   boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).forEach(b=>put({recordType:'BOARD',boardId:b.id,boardName:b.name}));
-  people.forEach(p=>put({recordType:'PERSON',personId:p.id,personName:p.name,personTitle:p.title,personDepartment:p.department,personEmail:p.email,location:p.location,jobLevel:p.jobLevel,performance:p.performance,potential:p.potential,retentionRisk:p.retentionRisk,mobility:p.mobility,criticalExperience:p.criticalExperience,skills:p.skills,readiness:p.readiness,source:p.source,candidateType:p.candidateType,confidence:p.confidence,notes:p.notes}));
-  roles.forEach(r=>put({recordType:'ROLE',boardId:r.boardId,roleId:r.id,roleTitle:r.title,level:r.level,department:r.department,managerRoleId:r.managerRoleId,incumbentPersonId:r.incumbentPersonId,incumbentName:r.incumbentName,risk:r.risk,criticality:r.criticality,owner:r.owner,status:r.status,sortOrder:r.sortOrder}));
-  successors.forEach(s=>put({recordType:'SUCCESSOR',roleId:s.id,successorRoleId:s.roleId,personId:s.personId,readiness:s.readiness,source:s.source,candidateType:s.candidateType,confidence:s.confidence,ranking:s.ranking,notes:s.notes,approved:s.approved,autoMoveQueued:s.autoMoveQueued}));
+  people.forEach(p=>put({recordType:'PERSON',personId:p.id,personName:p.name,personTitle:p.title,personDepartment:p.department,personEmail:p.email,location:p.location,jobLevel:p.jobLevel,performance:p.performance,potential:p.potential,retentionRisk:p.retentionRisk,mobility:p.mobility,criticalExperience:p.criticalExperience,skills:p.skills,readiness:p.readiness,source:p.source,candidateType:p.candidateType,confidence:p.confidence,notes:p.notes},p._x));
+  roles.forEach(r=>put({recordType:'ROLE',boardId:r.boardId,roleId:r.id,roleTitle:r.title,level:r.level,department:r.department,managerRoleId:r.managerRoleId,incumbentPersonId:r.incumbentPersonId,incumbentName:r.incumbentName,risk:r.risk,criticality:r.criticality,owner:r.owner,status:r.status,sortOrder:r.sortOrder},r._x));
+  successors.forEach(s=>put({recordType:'SUCCESSOR',roleId:s.id,successorRoleId:s.roleId,personId:s.personId,readiness:s.readiness,source:s.source,candidateType:s.candidateType,confidence:s.confidence,ranking:s.ranking,notes:s.notes,approved:s.approved,autoMoveQueued:s.autoMoveQueued},s._x));
   rules.forEach(r=>put({recordType:'RULE',ruleId:r.id,ruleName:r.name,ruleType:r.type,ruleScope:r.scope,ruleField:r.field,ruleOperator:r.operator,ruleValue:r.value,rulePersonId:r.personId,ruleTargetRoleId:r.targetRoleId,ruleAltPersonId:r.altPersonId,ruleSeverity:r.severity,ruleMessage:r.message,ruleEnabled:r.enabled}));
   history.forEach(h=>put({recordType:'HISTORY',historyId:h.id,historyDate:h.date,historyAction:h.action,historyDetails:h.details}));
   put({recordType:'SETTING',settingKey:'customFieldValues',settingValue:JSON.stringify(customFieldValues)});
+  put({recordType:'SETTING',settingKey:'chessFields',settingValue:JSON.stringify(chessDefaultFields||CHESS_DEFAULT_FIELDS)});
   return rows.join('\n');
+}
+function downloadTemplate(){
+  const row=o=>CSV_HEADERS.map(h=>csvEsc(o[h])).join(',');
+  const csv=[CSV_HEADERS.join(','),
+    row({recordType:'BOARD',boardId:'BOARD-EXAMPLE',boardName:'Example Board'}),
+    row({recordType:'PERSON',personId:'P-001',personName:'Jordan Example',personTitle:'Director, Operations',personDepartment:'Operations',personEmail:'jordan@example.com',location:'Austin',jobLevel:'Director',performance:'High',potential:'High',retentionRisk:'Low',mobility:'Yes',skills:'Leadership; Planning',readiness:'Ready Now',source:'Internal',candidateType:'Successor',confidence:'High',notes:'Add one PERSON row per person.'}),
+    row({recordType:'PERSON',personId:'P-002',personName:'Riley Example',personTitle:'VP, Operations',personDepartment:'Operations',location:'Remote',readiness:'1-2 Years',source:'Internal',candidateType:'Successor',confidence:'Medium'}),
+    row({recordType:'ROLE',boardId:'BOARD-EXAMPLE',roleId:'R-VP-OPS',roleTitle:'VP, Operations',level:'VP',department:'Operations',incumbentPersonId:'P-002',incumbentName:'Riley Example',risk:'Medium',criticality:'High',status:'Active Plan',sortOrder:'1'}),
+    row({recordType:'ROLE',boardId:'BOARD-EXAMPLE',roleId:'R-DIR-OPS',roleTitle:'Director, Operations',level:'Director',department:'Operations',managerRoleId:'R-VP-OPS',incumbentPersonId:'P-001',incumbentName:'Jordan Example',risk:'Low',criticality:'Medium',status:'Active Plan',sortOrder:'2'}),
+    row({recordType:'SUCCESSOR',roleId:'S-0001',successorRoleId:'R-VP-OPS',personId:'P-001',readiness:'Ready Now',source:'Internal',candidateType:'Successor',confidence:'High',ranking:'1',notes:'One SUCCESSOR row per candidate on a slate. successorRoleId is the role; personId is the candidate.',approved:'false',autoMoveQueued:'false'}),
+  ].join('\n');
+  download('succession_planner_template.csv',csv,'text/csv');
+  notice('OK','Starter template downloaded. PERSON = people, ROLE = positions (managerRoleId builds the tree), SUCCESSOR = slate rows. New columns you add are kept.');
 }
 function download(name,content,type){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url)}
 async function openCSV(){
@@ -921,6 +996,7 @@ function render(){
   renderPieceBox();
   renderApproved();
   renderMessages();
+  if(chess)renderChessView();
 }
 function setView(title,hint,actions=''){el('viewTitle').textContent=title;el('viewHint').innerHTML=hint||'';el('viewActions').innerHTML=actions||''}
 function fillFilters(){
@@ -996,7 +1072,7 @@ function roleCard(r){
     ${inc}
     <div class="chips"><span class="chip">${esc(r.id)}</span><span class="chip">${plur(ss.length,'candidate')}</span>${r.criticality?`<span class="chip">${esc(r.criticality)}</span>`:''}</div>
     <div class="succ-list">${ss.length?ss.map(succPill).join(''):'<div class="drop-hint">Drop a candidate here</div>'}</div>
-    <div class="role-actions"><button class="btn btn-quiet btn-sm" data-action="approveTop" data-role-id="${attr(r.id)}">Approve Top</button><button class="btn btn-quiet btn-sm" data-action="openRole" data-role-id="${attr(r.id)}">Open</button>${assign}</div>
+    <div class="role-actions"><button class="btn btn-quiet btn-sm" data-action="openChess" data-role-id="${attr(r.id)}" title="Open the chess-style succession board">♞ Board</button><button class="btn btn-quiet btn-sm" data-action="approveTop" data-role-id="${attr(r.id)}">Approve Top</button><button class="btn btn-quiet btn-sm" data-action="openRole" data-role-id="${attr(r.id)}">Open</button>${assign}</div>
   </article>`;
 }
 function succPill(s){
@@ -1016,19 +1092,64 @@ function succPill(s){
 }
 
 /* ---------- org tree ---------- */
-function renderTree(){
-  setView('Master Org Tree','Reporting lines follow each role’s Manager Role field. Click a role to open it.');
-  const roots=roles.filter(r=>!r.managerRoleId||!role(r.managerRoleId));
-  el('mainView').innerHTML='<div class="tree">'+(roots.length
-    ?'<div class="tree-item" style="flex-direction:row;align-items:flex-start">'+roots.map(r=>treeNode(r,new Set())).join('')+'</div>'
-    :emptyState('No data yet','Open your CSV database or add your first role.',`<button class="btn btn-quiet" data-action="openCSV">Open CSV</button> <button class="btn btn-primary" data-action="openRoleDrawerNew" style="margin-left:6px">+ Add Role</button>`))+'</div>';
+function computeTreeParents(){
+  const lvls=levels();
+  const li=l=>{const i=lvls.indexOf(l);return i<0?lvls.length:i};
+  const parents=new Map(); // roleId -> {id, inferred}
+  roles.forEach(r=>{
+    if(r.managerRoleId&&r.managerRoleId!==r.id&&role(r.managerRoleId)){parents.set(r.id,{id:r.managerRoleId,inferred:false});return}
+    const my=li(r.level);
+    let best=null;
+    // closest higher level within the same department, e.g. a VP slots under the SVP
+    roles.forEach(c=>{
+      if(c.id===r.id)return;
+      const cl=li(c.level);
+      if(cl>=my||norm(c.department)!==norm(r.department))return;
+      if(!best||cl>best.lvl||(cl===best.lvl&&(+c.sortOrder||999)<best.sort))best={id:c.id,lvl:cl,sort:+c.sortOrder||999};
+    });
+    if(!best)roles.forEach(c=>{ // otherwise hang under the topmost role overall
+      if(c.id===r.id)return;
+      const cl=li(c.level);
+      if(cl>=my)return;
+      if(!best||cl<best.lvl||(cl===best.lvl&&(+c.sortOrder||999)<best.sort))best={id:c.id,lvl:cl,sort:+c.sortOrder||999};
+    });
+    if(best)parents.set(r.id,{id:best.id,inferred:true});
+  });
+  return parents;
 }
-function treeNode(r,seen){
+function renderTree(){
+  const parents=computeTreeParents();
+  const inferredCount=[...parents.values()].filter(p=>p.inferred).length;
+  setView('Master Org Tree',
+    'Reporting lines follow each role’s Manager Role field. Roles without one are placed by level within their department (dashed).'+(inferredCount?' Use the button to make those lines permanent.':'')+' Click a role to open it.',
+    inferredCount?`<button class="btn btn-quiet btn-sm" data-action="applyInferred">Apply ${inferredCount} inferred line${inferredCount===1?'':'s'}</button>`:'');
+  const kidsMap=new Map();
+  roles.forEach(r=>{const p=parents.get(r.id);if(p){const a=kidsMap.get(p.id);if(a)a.push(r);else kidsMap.set(p.id,[r])}});
+  kidsMap.forEach(a=>a.sort((x,y)=>(+x.sortOrder||999)-(+y.sortOrder||999)));
+  const roots=roles.filter(r=>!parents.has(r.id));
+  el('mainView').innerHTML='<div class="tree">'+(roots.length
+    ?'<div class="tree-item" style="flex-direction:row;align-items:flex-start">'+roots.map(r=>treeNode(r,kidsMap,parents,new Set())).join('')+'</div>'
+    :(roles.length
+      ?emptyState('Could not find a top role','Reporting lines seem to form a loop — open a role and fix its Manager Role.')
+      :emptyState('No data yet','Open your CSV database or add your first role.',`<button class="btn btn-quiet" data-action="openCSV">Open CSV</button> <button class="btn btn-primary" data-action="openRoleDrawerNew" style="margin-left:6px">+ Add Role</button>`)))+'</div>';
+}
+function treeNode(r,kidsMap,parents,seen){
   if(seen.has(r.id))return '';
   seen.add(r.id);
-  const kids=roles.filter(x=>x.managerRoleId===r.id).sort((a,b)=>(+a.sortOrder||999)-(+b.sortOrder||999));
+  const kids=kidsMap.get(r.id)||[];
   const vac=isRoleVacant(r);
-  return `<div class="tree-item"><div class="node" data-action="openRole" data-role-id="${attr(r.id)}"><b>${esc(r.title)}</b><div class="nsub ${vac?'nvac':''}">${vac?'VACANT':esc(personName(r.incumbentPersonId,r.incumbentName||'VACANT'))}</div><div class="nsub">${esc(r.level||'')}${r.department?' · '+esc(r.department):''}</div></div>${kids.length?'<div class="children">'+kids.map(k=>treeNode(k,seen)).join('')+'</div>':''}</div>`;
+  const inf=parents.get(r.id)?.inferred;
+  return `<div class="tree-item"><div class="node ${inf?'inferred':''}" data-action="openRole" data-role-id="${attr(r.id)}"><b>${esc(r.title)}</b><div class="nsub ${vac?'nvac':''}">${vac?'VACANT':esc(personName(r.incumbentPersonId,r.incumbentName||'VACANT'))}</div><div class="nsub">${esc(r.level||'')}${r.department?' · '+esc(r.department):''}</div>${inf?'<div class="ninf">placed by level — no manager set</div>':''}</div>${kids.length?'<div class="children">'+kids.map(k=>treeNode(k,kidsMap,parents,seen)).join('')+'</div>':''}</div>`;
+}
+function applyInferredLines(){
+  const parents=computeTreeParents();
+  const inferred=[...parents.entries()].filter(([,p])=>p.inferred);
+  if(!inferred.length){notice('WARN','Nothing to apply — every role already has a manager.');return}
+  pushUndo('Apply inferred reporting lines');
+  inferred.forEach(([rid,p])=>{const r=role(rid);if(r)r.managerRoleId=p.id});
+  log('Hierarchy Updated',`${inferred.length} inferred reporting line(s) applied`);
+  notice('OK',`${inferred.length} reporting line(s) written onto the roles. Save the CSV to keep them.`);
+  render();
 }
 
 /* ---------- people ---------- */
@@ -1186,6 +1307,31 @@ function targetRoleOptions(sel=''){return '<option value=""></option>'+roles.map
 function personOptions(sel=''){return '<option value="">VACANT</option>'+people.map(p=>`<option value="${attr(p.id)}" ${p.id===sel?'selected':''}>${esc(p.name)} (${esc(p.id)})</option>`).join('')}
 function rulePersonOptions(sel=''){return '<option value=""></option>'+people.map(p=>`<option value="${attr(p.id)}" ${p.id===sel?'selected':''}>${esc(p.name)} (${esc(p.id)})</option>`).join('')}
 
+/* ---------- user-defined extra fields (future CSV columns) ---------- */
+function extraKeysFor(list){const s=new Set();list.forEach(e=>Object.keys(e._x||{}).forEach(k=>s.add(k)));return[...s].sort((a,b)=>a.localeCompare(b))}
+function extraFieldsSection(entity,list){
+  const keys=extraKeysFor(list);
+  const inputs=keys.map(k=>`<div><label>${esc(k)}</label><input class="extraField" data-extra-key="${attr(k)}" value="${attr((entity._x||{})[k]||'')}"></div>`).join('');
+  return `<div class="extra-fields"><div class="side-title" style="margin-bottom:2px">Additional Fields</div><div class="hint">Your own columns. They are saved as extra columns in the CSV, so the template grows with you — and columns added straight to the CSV show up here too.</div><div class="grid">${inputs}</div><button type="button" class="btn btn-quiet btn-sm" style="margin-top:10px" data-action="addExtraField">+ Add field</button></div>`;
+}
+function collectExtras(existing){
+  const out={...(existing||{})};
+  document.querySelectorAll('#drawerBody .extraField').forEach(i=>{out[i.dataset.extraKey]=i.value});
+  return Object.keys(out).length?out:undefined;
+}
+function addExtraFieldPrompt(){
+  openSmallValueBox('Add a new field (becomes a CSV column)',name=>{
+    name=name.replace(/[",\r\n]/g,' ').trim();
+    if(!name)return;
+    if(CSV_HEADERS.includes(name)){notice('ERR',`"${name}" is already a built-in column.`);return}
+    const box=document.querySelector('#drawerBody .extra-fields .grid');
+    if(!box)return;
+    if([...box.querySelectorAll('.extraField')].some(i=>i.dataset.extraKey===name)){notice('WARN','That field already exists.');return}
+    box.insertAdjacentHTML('beforeend',`<div><label>${esc(name)}</label><input class="extraField" data-extra-key="${attr(name)}" value=""></div>`);
+    notice('OK',`Field "${name}" added — fill it in and Save. It appears on every record of this type from now on.`);
+  });
+}
+
 function openAddChooser(){
   openDrawer('Add to the plan','Choose the record type.',
     `<div class="choice-grid">
@@ -1237,7 +1383,7 @@ function openPersonDrawer(id='',fromRole='',defaultType='Successor'){
   if(id&&!p){notice('ERR','Person not found: '+id);return}
   backRoleId=fromRole||'';
   openDrawer(id?p.name:'Add Employee / Candidate',id?`${p.title||'No title'} · ${p.id}`:'Candidate details drive rules and slate placement.',
-    personForm(p)+(id?personSlateSection(id):''),
+    personForm(p)+extraFieldsSection(p,people)+(id?personSlateSection(id):''),
     ()=>savePerson(id),
     (id?`<button type="button" class="btn btn-danger" data-action="deletePerson" data-person-id="${attr(id)}">Delete Person</button>`:'')+`<button type="button" class="btn btn-quiet" data-action="openRoleDrawerNew">Add Role</button>`,
     !!fromRole);
@@ -1259,7 +1405,7 @@ function savePerson(oldId=''){
   if(id!==oldId&&person(id)){notice('ERR',`Person ID "${id}" is already used by ${personName(id)}. Pick a unique ID.`);return}
   pushUndo(oldId?'Update employee/candidate':'Add employee/candidate');
   const val=x=>v(x)==='__ADD__'?'':v(x);
-  const obj={id,name,title:v('pTitle'),department:val('pDept'),email:v('pEmail'),location:val('pLoc'),jobLevel:val('pJob'),readiness:val('pReady'),source:val('pSource'),candidateType:val('pType'),performance:val('pPerf'),potential:val('pPot'),retentionRisk:val('pRet'),mobility:val('pMob'),confidence:val('pConf'),criticalExperience:v('pExp'),skills:v('pSkills'),notes:v('pNotes')};
+  const obj={id,name,title:v('pTitle'),department:val('pDept'),email:v('pEmail'),location:val('pLoc'),jobLevel:val('pJob'),readiness:val('pReady'),source:val('pSource'),candidateType:val('pType'),performance:val('pPerf'),potential:val('pPot'),retentionRisk:val('pRet'),mobility:val('pMob'),confidence:val('pConf'),criticalExperience:v('pExp'),skills:v('pSkills'),notes:v('pNotes'),_x:collectExtras(oldId?person(oldId)?._x:undefined)};
   const ix=oldId?people.findIndex(p=>p.id===oldId):-1;
   if(ix>=0){people[ix]=obj;if(oldId!==id)renamePersonRefs(oldId,id)}else people.push(obj);
   roles.forEach(r=>{if(r.incumbentPersonId===id)r.incumbentName=name});
@@ -1313,9 +1459,10 @@ function openRoleDrawer(id=''){
       <div><label>Status</label><input id="rStatus" value="${attr(r.status)}"></div>
       <div><label>Sort Order</label><input id="rSort" type="number" value="${attr(r.sortOrder)}"></div>
     </div>
+    ${extraFieldsSection(r,roles)}
     <div class="drawer-section-title">Candidate Slate</div>${slate}`,
     ()=>saveRole(id),
-    id?`<button class="btn btn-danger" data-action="deleteRole" data-role-id="${attr(id)}">Delete Role</button> <button class="btn btn-green" data-action="addCandidateFromRole" data-role-id="${attr(id)}">Add Candidate</button>`
+    id?`<button class="btn btn-danger" data-action="deleteRole" data-role-id="${attr(id)}">Delete Role</button> <button class="btn btn-green" data-action="addCandidateFromRole" data-role-id="${attr(id)}">Add Candidate</button> <button class="btn btn-quiet" data-action="openChess" data-role-id="${attr(id)}">♞ Chess View</button>`
       :`<button class="btn btn-green" data-action="addCandidateFromRole">Add Candidate</button>`);
 }
 function renameRoleRefs(oldId,newId){
@@ -1338,7 +1485,7 @@ function saveRole(oldId=''){
   pushUndo(oldId?'Update role':'Add role');
   const val=x=>v(x)==='__ADD__'?'':v(x);
   const inc=v('rInc');
-  const obj={id,title,level:val('rLevel')||'VP',department:val('rDept'),boardId:val('rBoard'),managerRoleId:managerId,incumbentPersonId:inc,incumbentName:inc?personName(inc):'VACANT',risk:val('rRisk'),criticality:val('rCrit'),owner:v('rOwner'),status:v('rStatus'),sortOrder:Number(v('rSort')||999)};
+  const obj={id,title,level:val('rLevel')||'VP',department:val('rDept'),boardId:val('rBoard'),managerRoleId:managerId,incumbentPersonId:inc,incumbentName:inc?personName(inc):'VACANT',risk:val('rRisk'),criticality:val('rCrit'),owner:v('rOwner'),status:v('rStatus'),sortOrder:Number(v('rSort')||999),_x:collectExtras(oldId?role(oldId)?._x:undefined)};
   const ix=oldId?roles.findIndex(r=>r.id===oldId):-1;
   if(ix>=0){roles[ix]=obj;if(oldId!==id)renameRoleRefs(oldId,id)}else roles.push(obj);
   log('Role Saved',`${title} (${id}) saved`);
@@ -1554,6 +1701,175 @@ function openBoardDrawer(){
 }
 
 /* =====================================================================
+   Chess View — per-role succession board with staged moves
+   ===================================================================== */
+function chessFieldOptions(){
+  const base=[['title','Title'],['department','Department'],['location','Location'],['jobLevel','Job Level'],['readiness','Readiness'],['source','Source'],['candidateType','Candidate Type'],['confidence','Confidence'],['performance','Performance'],['potential','Potential'],['retentionRisk','Retention Risk'],['mobility','Mobility'],['skills','Skills'],['email','Email'],['criticalExperience','Critical Experience']];
+  extraKeysFor(people).forEach(k=>base.push([k,k]));
+  return base;
+}
+function chessFieldLabel(f){const hit=chessFieldOptions().find(([k])=>k===f);return hit?hit[1]:f}
+function chessActiveFields(){return chessSessionFields||chessDefaultFields||CHESS_DEFAULT_FIELDS}
+function chessPieceFor(i){return CHESS_PIECES[Math.min(i,CHESS_PIECES.length-1)]}
+function ordinal(n){return n+(n%10===1&&n%100!==11?'st':n%10===2&&n%100!==12?'nd':n%10===3&&n%100!==13?'rd':'th')}
+function displayFieldValue(s,f){
+  const p=person(s.personId)||{};
+  const sv=['readiness','source','candidateType','confidence'].includes(f)?s[f]:undefined;
+  return sv||p[f]||(p._x||{})[f]||'';
+}
+function openChessView(roleId){
+  const r=role(roleId);
+  if(!r){notice('ERR','Role not found.');return}
+  closeDrawer();
+  chess={roleId,order:slateFor(roleId).map(s=>s.id),stagedIncumbent:null,dirtyMoves:false,menuOpen:false,fields:[...chessActiveFields()]};
+  renderChessView();
+}
+function closeChessView(force=false){
+  if(chess&&!force&&(chess.dirtyMoves||chess.stagedIncumbent)&&!confirm('Discard the unsaved moves on this board?'))return;
+  chess=null;
+  el('chessOverlay').classList.add('hidden');
+  el('chessOverlay').innerHTML='';
+}
+function chessSwap(aSid,bSid){
+  if(!chess)return;
+  const i=chess.order.indexOf(aSid),j=chess.order.indexOf(bSid);
+  if(i<0||j<0||i===j)return;
+  [chess.order[i],chess.order[j]]=[chess.order[j],chess.order[i]];
+  chess.dirtyMoves=true;
+  renderChessView();
+}
+function chessTakeSeat(sid){
+  if(!chess||!chess.order.includes(sid))return;
+  chess.stagedIncumbent=sid;
+  renderChessView();
+}
+function chessResetSeat(){if(chess){chess.stagedIncumbent=null;renderChessView()}}
+function chessToggleField(f){
+  if(!chess)return;
+  const i=chess.fields.indexOf(f);
+  if(i>=0)chess.fields.splice(i,1);else chess.fields.push(f);
+  chessSessionFields=[...chess.fields];
+  chess.menuOpen=true;
+  renderChessView();
+}
+function chessSetDefaultFields(){
+  if(!chess)return;
+  chessDefaultFields=[...chess.fields];
+  chessSessionFields=[...chess.fields];
+  markDirty();
+  chess.menuOpen=false;
+  notice('OK','These fields are now the default for every board in the program. Save the CSV to keep it.');
+  renderChessView();
+}
+function chessCallouts(r){
+  const out=[];
+  if(chess.stagedIncumbent){
+    const s=successors.find(x=>x.id===chess.stagedIncumbent);
+    if(s){
+      const e=evaluateRules(s);
+      e.blocks.forEach(m=>out.push(['err','Blocked by rule: '+m]));
+      e.reviews.forEach(m=>out.push(['warn',m]));
+      const old=currentRoleForPerson(s.personId);
+      if(old&&old.id!==r.id)out.push(['warn',`${personName(s.personId)} currently holds ${old.title} — saving leaves it VACANT (backfill rules and the auto-move queue will run).`]);
+      if(r.incumbentPersonId&&r.incumbentPersonId!==s.personId)out.push(['warn',`${personName(r.incumbentPersonId,r.incumbentName)} steps down from ${r.title} on save.`]);
+    }
+  }
+  return out;
+}
+function renderChessView(){
+  if(!chess)return;
+  const r=role(chess.roleId);
+  if(!r){closeChessView(true);return}
+  chess.order=chess.order.filter(id=>successors.some(s=>s.id===id&&s.roleId===chess.roleId));
+  slateFor(chess.roleId).forEach(s=>{if(!chess.order.includes(s.id))chess.order.push(s.id)});
+  if(chess.stagedIncumbent&&!chess.order.includes(chess.stagedIncumbent))chess.stagedIncumbent=null;
+  const fields=chess.fields;
+  const staged=chess.stagedIncumbent?successors.find(s=>s.id===chess.stagedIncumbent):null;
+  const pending=chess.dirtyMoves||!!staged;
+  const callouts=chessCallouts(r).map(([cls,m])=>`<div class="notice ${cls}">${esc(m)}</div>`).join('');
+  const fieldRows=s=>fields.map(f=>{const val=displayFieldValue(s,f);return val?`<div><b>${esc(chessFieldLabel(f))}:</b> ${esc(val)}</div>`:''}).join('');
+  const gridSquares=chess.order.filter(id=>id!==chess.stagedIncumbent).map((sid,i)=>{
+    const s=successors.find(x=>x.id===sid);
+    if(!s)return '';
+    const piece=chessPieceFor(i);
+    return `<div class="square ${i%2?'alt':''}" draggable="true" data-drag="chessPiece" data-drop="chessPiece" data-succ-id="${attr(s.id)}" title="Drag onto another piece to swap, or onto the throne to take the seat">
+      <span class="plink"><button class="icon-btn" data-action="openPerson" data-person-id="${attr(s.personId)}" title="Open profile">&#9776;</button></span>
+      <span class="pglyph">${piece[0]}</span>
+      <span class="prank">${piece[1]} · ${ordinal(i+1)} in line${s.approved?' · &#10003;':''}${s.autoMoveQueued?' · &#9889;':''}</span>
+      <span class="pname">${esc(personName(s.personId))}</span>
+      <span class="pinfo">${fieldRows(s)}</span>
+    </div>`;
+  }).join('');
+  const throne=staged
+    ?`<div class="throne staged" data-drop="chessKing"><div class="t-label">Taking the seat on save</div><span class="king">&#9818;</span><div class="t-name">${esc(personName(staged.personId))}</div><div class="t-sub">${esc(displayFieldValue(staged,'title')||'')}</div><div style="margin-top:8px"><button class="btn btn-quiet btn-sm" data-action="chessResetSeat">Undo this move</button></div></div>`
+    :(isRoleVacant(r)
+      ?`<div class="throne vacant" data-drop="chessKing"><div class="t-label">Empty throne</div><span class="king">&#9818;</span><div class="t-name" style="color:var(--red)">VACANT</div><div class="t-sub">Drag a piece here to take the seat</div></div>`
+      :`<div class="throne" data-drop="chessKing"><div class="t-label">King — current incumbent</div><span class="king">&#9818;</span><div class="t-name">${esc(personName(r.incumbentPersonId,r.incumbentName))}</div><div class="t-sub">Drag a piece onto the throne to replace</div></div>`);
+  const stepsDown=staged&&r.incumbentPersonId&&r.incumbentPersonId!==staged.personId
+    ?`<div class="steps-down"><b>${esc(personName(r.incumbentPersonId,r.incumbentName))}</b> steps down when you save.</div>`:'';
+  const fieldsMenu=chess.menuOpen?`<div class="chess-fields-menu">
+      <div class="cf-head">Info shown under every piece</div>
+      ${chessFieldOptions().map(([f,label])=>`<label><input type="checkbox" data-change="chessField" data-field="${attr(f)}" ${fields.includes(f)?'checked':''}>${esc(label)}</label>`).join('')}
+      <div style="border-top:1px solid var(--line2);margin-top:8px;padding-top:8px">
+        <button class="btn btn-quiet btn-sm" data-action="chessSetDefault" style="width:100%">Make default for all boards</button>
+        <div class="hint" style="margin-top:6px">Applies to every role&rsquo;s chess view across the whole program and is saved in the CSV.</div>
+      </div>
+    </div>`:'';
+  el('chessOverlay').innerHTML=`
+    <div class="chess-head">
+      <h2><span class="glyph">&#9822;</span> ${esc(r.title)} &mdash; Succession Board</h2>
+      <div class="hint">Drag a piece onto another to swap places. Drag onto the throne to take the seat. Nothing changes until you press Save.</div>
+      ${pending?'<span class="pending-chip">Unsaved moves</span>':''}
+      <div class="chess-fields-wrap"><button class="btn btn-quiet btn-sm" data-action="chessFieldsMenu">Fields shown</button>${fieldsMenu}</div>
+      <button class="btn btn-quiet btn-sm" data-action="chessClose">Close</button>
+      <button class="btn btn-primary btn-sm" data-action="chessSave">Save</button>
+    </div>
+    <div class="chess-body">
+      <div class="chess-callouts">${callouts}</div>
+      <div class="throne-row">${throne}${stepsDown}</div>
+      ${gridSquares?`<div class="chess-grid">${gridSquares}</div>`:'<div class="chess-empty">No candidates on this slate yet — close this view and drag candidates onto the role first.</div>'}
+    </div>`;
+  el('chessOverlay').classList.remove('hidden');
+}
+function saveChessView(){
+  if(!chess)return;
+  const r=role(chess.roleId);
+  if(!r){closeChessView(true);return}
+  const staged=chess.stagedIncumbent?successors.find(s=>s.id===chess.stagedIncumbent):null;
+  if(staged){
+    const e=evaluateRules(staged);
+    if(e.blocks.length){e.blocks.forEach(m=>notice('ERR',m));renderChessView();return}
+    if(!person(staged.personId)){notice('ERR','Cannot save: the candidate&rsquo;s person record is missing.');renderChessView();return}
+  }
+  if(!chess.dirtyMoves&&!staged){closeChessView(true);return}
+  pushUndo('Chess board save');
+  automationDepth=0;
+  const rankOf=new Map(chess.order.map((id,i)=>[id,i+1]));
+  successors.filter(s=>s.roleId===chess.roleId&&rankOf.has(s.id)).forEach(s=>s.ranking=rankOf.get(s.id));
+  normalizeRanks(chess.roleId);
+  if(staged){
+    const p=person(staged.personId);
+    evaluateRules(staged).reviews.forEach(m=>notice('WARN',m));
+    const old=currentRoleForPerson(staged.personId);
+    successors.filter(x=>x.roleId===staged.roleId).forEach(x=>x.approved=false);
+    staged.approved=true;
+    const affected=new Set(successors.filter(x=>x.personId===staged.personId&&x.id!==staged.id).map(x=>x.roleId));
+    successors=successors.filter(x=>x.id===staged.id||x.personId!==staged.personId);
+    affected.forEach(rid=>normalizeRanks(rid));
+    const replaced=r.incumbentPersonId?personName(r.incumbentPersonId,r.incumbentName):'VACANT';
+    r.incumbentPersonId=staged.personId;r.incumbentName=p.name;r.status='Approved Move';
+    if(old&&old.id!==r.id){old.incumbentPersonId='';old.incumbentName='VACANT';old.status='Action Required';old.risk='High';runVacancyAutomation(old.id)}
+    log('Approved Move',`${p.name} moved to ${r.title} on the chess board; replaced ${replaced}`);
+    notice('OK',`${p.name} approved into ${r.title}.`);
+  }else{
+    log('Slate Reordered',`${r.title} slate reordered on the chess board`);
+    notice('OK','New slate order saved.');
+  }
+  closeChessView(true);
+  render();
+}
+
+/* =====================================================================
    Event delegation, keyboard, boot
    ===================================================================== */
 const ACTIONS={
@@ -1600,11 +1916,21 @@ const ACTIONS={
   addCustomMapRow:()=>addCustomMapRow(),
   addBoardRow:()=>addBoardRow(),
   removeParent:(d,elm)=>elm.closest(d.target)?.remove(),
+  openChess:d=>openChessView(d.roleId),
+  chessClose:()=>closeChessView(),
+  chessSave:()=>saveChessView(),
+  chessResetSeat:()=>chessResetSeat(),
+  chessFieldsMenu:()=>{if(chess){chess.menuOpen=!chess.menuOpen;renderChessView()}},
+  chessSetDefault:()=>chessSetDefaultFields(),
+  applyInferred:()=>applyInferredLines(),
+  downloadTemplate:()=>{el('moreMenu').classList.remove('open');downloadTemplate()},
+  addExtraField:()=>addExtraFieldPrompt(),
 };
 document.addEventListener('click',e=>{
   const elm=e.target.closest('[data-action]');
   const menu=el('moreMenu');
   if(menu.classList.contains('open')&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');
+  if(chess&&chess.menuOpen&&!e.target.closest('.chess-fields-wrap')){chess.menuOpen=false;renderChessView()}
   if(!elm)return;
   const fn=ACTIONS[elm.dataset.action];
   if(fn){e.preventDefault();fn(elm.dataset,elm,e)}
@@ -1615,6 +1941,7 @@ document.addEventListener('change',e=>{
   if(t.dataset.change==='pieceFilter')return renderPieceBox();
   if(t.dataset.change==='customSelect')return handleCustomSelect(t);
   if(t.dataset.change==='ruleToggle')return toggleRule(t.dataset.ruleId,t.checked);
+  if(t.dataset.change==='chessField')return chessToggleField(t.dataset.field);
   if(t.classList.contains('condField')||t.classList.contains('condOperator'))return updateConditionValue(t);
   if(t.classList.contains('condValueSelect'))return handleRuleValueSelect(t);
   if(t.classList.contains('selAll'))return toggleAllCondValues(t);
@@ -1636,6 +1963,7 @@ document.addEventListener('dragstart',e=>{
   e.dataTransfer.effectAllowed='move';
   if(elm.dataset.drag==='succ'){e.dataTransfer.setData('succId',elm.dataset.succId);e.dataTransfer.setData('personId',elm.dataset.personId)}
   else if(elm.dataset.drag==='person')e.dataTransfer.setData('personId',elm.dataset.personId);
+  else if(elm.dataset.drag==='chessPiece')e.dataTransfer.setData('chessSucc',elm.dataset.succId);
 });
 document.addEventListener('dragover',e=>{
   if([...e.dataTransfer.types].includes('Files')){e.preventDefault();return}
@@ -1657,7 +1985,12 @@ document.addEventListener('drop',async e=>{
   }
   const t=e.target.closest('[data-drop]');
   if(!t)return;
-  const succId=e.dataTransfer.getData('succId'),personId=e.dataTransfer.getData('personId');
+  const succId=e.dataTransfer.getData('succId'),personId=e.dataTransfer.getData('personId'),chessSucc=e.dataTransfer.getData('chessSucc');
+  if(chessSucc){
+    if(t.dataset.drop==='chessPiece')return chessSwap(chessSucc,t.dataset.succId);
+    if(t.dataset.drop==='chessKing')return chessTakeSeat(chessSucc);
+    return;
+  }
   if(t.dataset.drop==='succ'){
     const target=successors.find(x=>x.id===t.dataset.succId);
     if(!target)return;
@@ -1675,7 +2008,11 @@ document.addEventListener('keydown',e=>{
     const modal=el('smallValueModal');
     if(modal){modal.remove();return}
     if(el('moreMenu').classList.contains('open')){el('moreMenu').classList.remove('open');return}
-    if(drawerIsOpen())closeDrawer();
+    if(drawerIsOpen()){closeDrawer();return}
+    if(chess){
+      if(chess.menuOpen){chess.menuOpen=false;renderChessView()}
+      else closeChessView();
+    }
     return;
   }
   const mod=e.ctrlKey||e.metaKey;
@@ -1699,6 +2036,9 @@ window.__APP__={
   approveSuccessor,approveTop,autoMove,evaluateRules,undoLastAction,resetOrgChanges,clearAll,consolidateDuplicateData,validateDataLinks,
   openPersonDrawer,savePerson,deletePerson,openRoleDrawer,saveRole,deleteRole,openRuleDrawer,saveRule,deleteRule,toggleRule,openBoardDrawer,
   openAddChooser,closeDrawer,addCustomValue,valuesForField,handleCustomSelect,isRoleVacant,slateFor,normalizeRanks,runVacancyAutomation,
+  openChessView,closeChessView,saveChessView,chessSwap,chessTakeSeat,chessToggleField,chessSetDefaultFields,
+  get chess(){return chess},get chessDefaultFields(){return chessDefaultFields},
+  computeTreeParents,applyInferredLines,downloadTemplate,extraColumnNames,extraKeysFor,prettyBoardName,
 };
 
 /* ---------- boot ---------- */

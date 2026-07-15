@@ -1,6 +1,6 @@
 # Succession Planner — Stress Test Report
 
-**Result: 64 / 64 automated scenarios pass, zero console errors.**
+**Result: 76 / 76 automated scenarios pass, zero console errors.**
 
 The suite (`tests/stress_test.cjs`) drives the real app in headless Chromium via
 Playwright — it clicks the actual buttons, opens the actual drawers, and fires real
@@ -28,6 +28,8 @@ NODE_PATH=$(npm root -g) node tests/stress_test.cjs
 | 10 | Insights | KPI numbers cross-checked against independently computed coverage/vacancy values; respects the filter bar |
 | 11 | Safety nets | dirty-flag lifecycle, localStorage auto-backup written and restorable after reload, Escape/backdrop drawer close |
 | 12 | Scale | 3,000 people / 800 roles / 4,000 slate rows: load 281 ms, full board render 266 ms, serialize 849 ms, round-trip intact; capped tables stay responsive |
+| 13 | Chess view | opens from a role card with the incumbent as King and pieces ranked Queen→Pawn; piece-onto-piece drag swaps places (staged only — real rankings untouched); Save persists the order to state and CSV; staging a rule-blocked candidate shows the callout and Save refuses; taking the seat shows vacancy + steps-down callouts and on Save moves the incumbent, vacates the old role and persists; Close with staged moves asks to discard and changes nothing; the field picker updates every piece at once and "Make default for all boards" survives the CSV round-trip |
+| 14 | CSV simplicity | unknown CSV columns are preserved per record, re-exported, and byte-stable; "+ Add field" in the person drawer creates a new CSV column visible on every person; a ROLE row naming an unknown board auto-creates the tab (readable name, BOARD row written back); the org tree infers SVP→VP→Director family-tree lines by level+department, renders them dashed, and "Apply inferred lines" writes real managerRoleIds (undoable); starter template download |
 
 ## Bugs found by the tests and fixed
 

@@ -124,7 +124,7 @@ function parseCsvRows(text) {
     const rows = parseCsvRows(await csvOf(page));
     const by = t => rows.filter(r => r.recordType === t).length;
     assertEq(by('PERSON'), 150); assertEq(by('ROLE'), 72); assertEq(by('RULE'), 5);
-    assertEq(by('BOARD'), 10); assertEq(by('SETTING'), 1);
+    assertEq(by('BOARD'), 10); assertEq(by('SETTING'), 2); // customFieldValues + chessFields
     assert(by('SUCCESSOR') >= 280, 'successor rows');
   });
 
@@ -1001,7 +1001,214 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     13. SCREENSHOTS for the report
+     13. CHESS VIEW
+     =================================================================== */
+  section('13. Chess view');
+  await loadBase(page);
+  await page.click('[data-action="tab"][data-tab-id="ALL"]');
+
+  await test('chess view opens from a role card: king + pieces by rank', async () => {
+    await page.click('.role[data-role-id="R-CEO"] [data-action="openChess"]');
+    assert(!(await page.evaluate(() => document.getElementById('chessOverlay').classList.contains('hidden'))), 'overlay open');
+    const slate = await page.evaluate(() => __APP__.slateFor('R-CEO').length);
+    assertEq(await page.locator('#chessOverlay .square').count(), slate, 'one square per candidate');
+    const throne = await page.locator('#chessOverlay .throne .t-name').textContent();
+    const inc = await page.evaluate(() => __APP__.people.find(p => p.id === __APP__.roles.find(r => r.id === 'R-CEO').incumbentPersonId).name);
+    assertEq(throne.trim(), inc, 'incumbent on the throne');
+    const firstRank = await page.locator('#chessOverlay .square .prank').first().textContent();
+    assert(firstRank.includes('Queen') && firstRank.includes('1st'), 'top candidate is the Queen: ' + firstRank);
+  });
+  await test('dragging one piece onto another swaps their places (staged only)', async () => {
+    const before = await page.evaluate(() => ({ order: [...__APP__.chess.order], ranks: __APP__.slateFor('R-CEO').map(s => s.id) }));
+    assert(before.order.length >= 2, 'needs 2+ pieces');
+    const a = before.order[0], b = before.order[before.order.length - 1];
+    await simulateDrag(page, `#chessOverlay .square[data-succ-id="${a}"]`, `#chessOverlay .square[data-succ-id="${b}"]`);
+    const after = await page.evaluate(() => ({ order: [...__APP__.chess.order], ranks: __APP__.slateFor('R-CEO').map(s => s.id), dirty: __APP__.chess.dirtyMoves }));
+    assertEq(after.order[0], b, 'swapped: last piece now first');
+    assertEq(after.order[after.order.length - 1], a, 'swapped: first piece now last');
+    assertEq(after.ranks.join(','), before.ranks.join(','), 'real rankings untouched before save');
+    assert(after.dirty, 'marked as unsaved moves');
+    assert(await page.locator('#chessOverlay .pending-chip').count() === 1, 'Unsaved moves chip shown');
+  });
+  await test('saving the board persists the new order to state and CSV', async () => {
+    const staged = await page.evaluate(() => [...__APP__.chess.order]);
+    await page.click('[data-action="chessSave"]');
+    assert(await page.evaluate(() => !__APP__.chess), 'overlay closed after save');
+    const ranks = await page.evaluate(() => __APP__.slateFor('R-CEO').map(s => s.id));
+    assertEq(ranks.join(','), staged.join(','), 'order applied');
+    const rows = parseCsvRows(await csvOf(page));
+    const first = rows.find(r => r.recordType === 'SUCCESSOR' && r.roleId === staged[0]);
+    assertEq(first.ranking, '1', 'CSV ranking updated');
+  });
+  await test('staging a rule-blocked candidate shows the callout and Save refuses', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const s = __APP__.slateFor('R-CEO').find(s => s.readiness !== 'Ready Now');
+      return { sid: s.id, inc: __APP__.roles.find(r => r.id === 'R-CEO').incumbentPersonId };
+    });
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    await simulateDrag(page, `#chessOverlay .square[data-succ-id="${t.sid}"]`, `#chessOverlay .throne`);
+    assert(await page.locator('#chessOverlay .notice.err').count() >= 1, 'block callout shown');
+    assert(await page.locator('#chessOverlay .throne.staged').count() === 1, 'throne staged');
+    await page.click('[data-action="chessSave"]');
+    assert(await page.evaluate(() => !!__APP__.chess), 'save refused, board stays open');
+    const inc = await page.evaluate(() => __APP__.roles.find(r => r.id === 'R-CEO').incumbentPersonId);
+    assertEq(inc, t.inc, 'incumbent unchanged');
+    await page.evaluate(() => __APP__.closeChessView(true));
+  });
+  await test('taking the seat: vacancy callout, steps-down note, save applies + persists', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const s = __APP__.successors.find(s => s.readiness === 'Ready Now'
+        && __APP__.people.some(p => p.id === s.personId)
+        && __APP__.roles.some(r => r.id === s.roleId && !__APP__.isRoleVacant(r))
+        && __APP__.roles.some(r => r.incumbentPersonId === s.personId && r.id !== s.roleId)
+        && __APP__.evaluateRules(s).blocks.length === 0);
+      const old = __APP__.roles.find(r => r.incumbentPersonId === s.personId);
+      return { sid: s.id, pid: s.personId, roleId: s.roleId, oldRoleId: old.id };
+    });
+    await page.evaluate(rid => __APP__.openChessView(rid), t.roleId);
+    await simulateDrag(page, `#chessOverlay .square[data-succ-id="${t.sid}"]`, `#chessOverlay .throne`);
+    assert(await page.locator('#chessOverlay .throne.staged').count() === 1, 'staged on throne');
+    assert(await page.locator('#chessOverlay .steps-down').count() === 1, 'steps-down note');
+    const callouts = await page.evaluate(() => [...document.querySelectorAll('#chessOverlay .notice')].map(n => n.textContent).join(' | '));
+    assert(callouts.includes('VACANT'), 'vacancy callout: ' + callouts.slice(0, 120));
+    await page.click('[data-action="chessSave"]');
+    const after = await page.evaluate(t => ({
+      inc: __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId,
+      old: __APP__.roles.find(r => r.id === t.oldRoleId).status,
+      open: !!__APP__.chess,
+    }), t);
+    assertEq(after.inc, t.pid, 'seat taken');
+    assert(['Action Required', 'Auto Move'].includes(after.old), 'old role vacated/backfilled');
+    assert(!after.open, 'board closed');
+    const rows = parseCsvRows(await csvOf(page));
+    assertEq(rows.find(r => r.recordType === 'ROLE' && r.roleId === t.roleId).incumbentPersonId, t.pid, 'CSV incumbent updated');
+  });
+  await test('closing with staged moves asks to discard and leaves state untouched', async () => {
+    await loadBase(page);
+    const before = await csvOf(page);
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    const order = await page.evaluate(() => [...__APP__.chess.order]);
+    await simulateDrag(page, `#chessOverlay .square[data-succ-id="${order[0]}"]`, `#chessOverlay .square[data-succ-id="${order[1]}"]`);
+    dialogs = [];
+    await page.click('[data-action="chessClose"]');
+    assert(dialogs.length === 1 && dialogs[0].message.includes('Discard'), 'discard confirm shown');
+    assert(await page.evaluate(() => !__APP__.chess), 'closed');
+    assertEq(await csvOf(page), before, 'no data changed');
+  });
+  await test('field picker applies to all pieces; program default persists in the CSV', async () => {
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    await page.click('[data-action="chessFieldsMenu"]');
+    await page.click('#chessOverlay input[data-change="chessField"][data-field="department"]');
+    let info = await page.locator('#chessOverlay .square .pinfo').first().textContent();
+    assert(info.includes('Department'), 'department now shown on pieces');
+    await page.click('[data-action="chessSetDefault"]');
+    const def = await page.evaluate(() => __APP__.chessDefaultFields);
+    assert(def.includes('department'), 'program default updated');
+    const csv = await csvOf(page);
+    const setting = parseCsvRows(csv).find(r => r.recordType === 'SETTING' && r.settingKey === 'chessFields');
+    assert(setting && setting.settingValue.includes('department'), 'chessFields SETTING row written');
+    await loadBase(page, csv);
+    const def2 = await page.evaluate(() => __APP__.chessDefaultFields);
+    assert(def2 && def2.includes('department'), 'default survives CSV round-trip');
+  });
+
+  /* ===================================================================
+     14. CSV SIMPLICITY (future columns, auto tabs, tree inference)
+     =================================================================== */
+  section('14. CSV simplicity for HR');
+  await test('unknown CSV columns are preserved per record and written back', async () => {
+    const headers = 'recordType,roleId,roleTitle,level,department,personId,personName,readiness,successorRoleId,ranking,costCenter,unionStatus';
+    const csv = [headers,
+      'PERSON,,,,,PX1,Casey Doe,Ready Now,,,CC-42,Non-union',
+      'ROLE,RX1,Role X,VP,Ops,,,,,,CC-9,',
+      'SUCCESSOR,SX1,,,,PX1,,Ready Now,RX1,1,CC-42,',
+    ].join('\n');
+    await loadBase(page, csv);
+    const x = await page.evaluate(() => ({
+      p: __APP__.people[0]._x, r: __APP__.roles[0]._x, cols: __APP__.extraColumnNames(),
+    }));
+    assertEq(x.p.costCenter, 'CC-42', 'person extra kept');
+    assertEq(x.r.costCenter, 'CC-9', 'role extra kept');
+    assert(x.cols.includes('costCenter') && x.cols.includes('unionStatus'), 'extra columns tracked');
+    const out = await csvOf(page);
+    assert(out.split('\n')[0].includes('costCenter'), 'extra column in exported header');
+    const rows = parseCsvRows(out);
+    assertEq(rows.find(r => r.personId === 'PX1' && r.recordType === 'PERSON').costCenter, 'CC-42', 'value round-trips');
+    await loadBase(page, out);
+    assertEq(await csvOf(page), out, 'byte-stable with extra columns');
+  });
+  await test('adding a field through the person drawer creates a new CSV column', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openPersonDrawer('P001'));
+    await page.click('[data-action="addExtraField"]');
+    await page.waitForSelector('#smallValueInput');
+    await page.fill('#smallValueInput', 'T-Shirt Size');
+    await page.click('#smallAdd');
+    await page.evaluate(() => {
+      const i = [...document.querySelectorAll('#drawerBody .extraField')].find(x => x.dataset.extraKey === 'T-Shirt Size');
+      i.value = 'M';
+    });
+    await page.click('#drawerSave');
+    const val = await page.evaluate(() => __APP__.people.find(p => p.id === 'P001')._x['T-Shirt Size']);
+    assertEq(val, 'M', 'value saved on person');
+    const out = await csvOf(page);
+    assert(out.split('\n')[0].includes('T-Shirt Size'), 'new column in CSV template');
+    // and the field now appears on every person's drawer
+    await page.evaluate(() => __APP__.openPersonDrawer('P002'));
+    assert(await page.evaluate(() => [...document.querySelectorAll('#drawerBody .extraField')].some(x => x.dataset.extraKey === 'T-Shirt Size')), 'field visible for other people');
+    await clickAction(page, 'closeDrawer');
+  });
+  await test('a role row naming an unknown board auto-creates the tab from the CSV', async () => {
+    const headers = 'recordType,boardId,roleId,roleTitle,level,department';
+    const csv = [headers, 'ROLE,BOARD-TALENT-POOL,RT1,Pool Lead,VP,Ops'].join('\n');
+    await loadBase(page, csv);
+    const b = await page.evaluate(() => __APP__.boards.find(x => x.id === 'BOARD-TALENT-POOL'));
+    assert(b, 'board auto-created');
+    assertEq(b.name, 'Talent Pool', 'readable tab name');
+    assert(await page.locator('[data-action="tab"][data-tab-id="BOARD-TALENT-POOL"]').count() === 1, 'tab rendered');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'BOARD' && r.boardId === 'BOARD-TALENT-POOL'), 'BOARD row written back');
+  });
+  await test('org tree infers SVP-over-VP family-tree lines; Apply makes them permanent', async () => {
+    const headers = 'recordType,roleId,roleTitle,level,department,managerRoleId,personId,personName';
+    const csv = [headers,
+      'ROLE,RC,Chief Exec,CEO,Exec,,,',
+      'ROLE,RS,SVP Sales,SVP,Sales,,,',
+      'ROLE,RV,VP Sales,VP,Sales,,,',
+      'ROLE,RD,Director Sales,Director,Sales,,,',
+    ].join('\n');
+    await loadBase(page, csv);
+    const parents = await page.evaluate(() => {
+      const m = __APP__.computeTreeParents();
+      return Object.fromEntries([...m.entries()].map(([k, v]) => [k, v]));
+    });
+    assertEq(parents.RV.id, 'RS', 'VP under SVP (same dept)');
+    assertEq(parents.RD.id, 'RV', 'Director under VP');
+    assertEq(parents.RS.id, 'RC', 'SVP falls back to top role');
+    assert(parents.RV.inferred && parents.RS.inferred, 'marked as inferred');
+    assert(await page.locator('.node.inferred').count() === 3, 'dashed inferred nodes rendered');
+    await page.click('[data-action="applyInferred"]');
+    const mgr = await page.evaluate(() => __APP__.roles.find(r => r.id === 'RV').managerRoleId);
+    assertEq(mgr, 'RS', 'managerRoleId written');
+    const rows = parseCsvRows(await csvOf(page));
+    assertEq(rows.find(r => r.recordType === 'ROLE' && r.roleId === 'RV').managerRoleId, 'RS', 'persisted to CSV');
+    assert(await page.locator('[data-action="applyInferred"]').count() === 0, 'button gone once applied');
+    await page.evaluate(() => __APP__.undoLastAction());
+    const mgr2 = await page.evaluate(() => __APP__.roles.find(r => r.id === 'RV').managerRoleId);
+    assertEq(mgr2, '', 'undo restores');
+  });
+  await test('starter template menu item downloads without breaking anything', async () => {
+    await loadBase(page);
+    await clickAction(page, 'toggleMenu');
+    await page.click('#moreMenu [data-action="downloadTemplate"]');
+    const msg = await lastMsg(page);
+    assert(msg && msg.type === 'OK' && msg.message.includes('template'), 'template toast shown');
+  });
+
+  /* ===================================================================
+     15. SCREENSHOTS for the report
      =================================================================== */
   section('13. Screenshots');
   await test('capture UI screenshots', async () => {
@@ -1031,6 +1238,10 @@ function parseCsvRows(text) {
     await tidy();
     await page.screenshot({ path: path.join(ROOT, 'tests', 'screen_drawer.png') });
     await page.evaluate(() => __APP__.closeDrawer());
+    await page.evaluate(() => __APP__.openChessView('R-COO'));
+    await tidy();
+    await page.screenshot({ path: path.join(ROOT, 'tests', 'screen_chess.png') });
+    await page.evaluate(() => __APP__.closeChessView(true));
   });
 
   /* ===================================================================

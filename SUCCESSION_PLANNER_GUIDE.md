@@ -30,6 +30,26 @@ restore next time it opens.
 - **Rules** — the guardrails. Flip a rule on/off right in the list.
 - **History** — the audit trail, saved inside the CSV.
 
+## The Chess Board (♞ on every role card)
+
+Press **♞ Board** on any role (or *Chess View* inside the role) for a full-screen
+succession board:
+
+- The **King** at the top is the current incumbent. An empty throne means the
+  role is vacant.
+- Candidates appear as pieces in line: **Queen** (1st), **Rook**, **Bishop**,
+  **Knight**, then **Pawns**.
+- **Drag one piece onto another to swap places** — the people trade positions
+  (and pieces).
+- **Drag a piece onto the throne to take the seat.** The old incumbent steps
+  down; if the new person holds another role, you'll see a callout that saving
+  leaves it vacant (backfill rules and the auto-move queue run as usual).
+- **Nothing happens until you press Save.** Rules still apply — a blocked
+  candidate shows a red callout and Save refuses. Close discards after asking.
+- **Fields shown** picks which details appear under every piece at once (one
+  set of checkboxes, no per-piece fiddling). **Make default for all boards**
+  saves that choice into the CSV for the whole program.
+
 ## Working a slate
 
 Each candidate row on a role card has: **↑ ↓** priority, **⚡ Auto** (move now if
@@ -54,6 +74,21 @@ warning. Priority: Block/field rules → Auto backfill → Auto-move queue.
 
 Every dropdown in the app accepts **+ Add value…** — new values are saved in the
 CSV and become available everywhere, including rule builders and filters.
+
+## Your CSV grows with you
+
+- **Need a new column?** Open any person or role and use **Additional Fields →
+  + Add field** — it becomes a real CSV column on save and appears on every
+  record from then on. Columns typed straight into the CSV are kept and shown
+  too; the app never throws away a column it doesn't recognize.
+- **New tab from the CSV:** just give a ROLE row a `boardId` (e.g.
+  `BOARD-TALENT-POOL`) — the tab is created automatically with a readable name.
+- **Hierarchy without hand-wiring:** leave `managerRoleId` blank and the Org
+  Tree places roles like a family tree by level within their department (an SVP
+  sits above the VPs, and so on), shown dashed. One click on **Apply inferred
+  lines** makes those reporting lines permanent.
+- **Starting fresh?** ⋯ → *Download starter template* gives you a small example
+  CSV with one row of each type to copy from.
 
 ## Safety
 
