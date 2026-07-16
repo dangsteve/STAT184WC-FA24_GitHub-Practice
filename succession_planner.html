@@ -288,6 +288,9 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
 .bp-main b{font-size:12px;line-height:1.3}
 .bp-main span{color:var(--muted);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .square .new-flag{position:absolute;top:8px;left:8px}
+.chess-foot{position:sticky;bottom:0;z-index:5;background:var(--surface);border-top:1px solid var(--line);padding:10px 22px;display:flex;gap:10px;align-items:center;justify-content:center;margin-top:auto}
+.chess-foot label{margin:0;white-space:nowrap}
+.chess-foot select{width:min(420px,60vw)}
 @media(max-width:1000px){.chess-cols{grid-template-columns:1fr}.chess-bank{position:static}}
 .chess-fields-wrap{position:relative}
 .chess-fields-menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);width:280px;padding:12px;z-index:20}
@@ -334,7 +337,9 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
         <button class="btn btn-quiet" data-action="toggleMenu" title="More actions">&#8943;</button>
         <div class="menu" id="moreMenu">
           <button data-action="manageTabs">Manage tabs&hellip;</button>
-          <button data-action="importSheets">Import sheets (merge)&hellip;</button>
+          <button data-action="importSheets">Import &amp; merge (CSV / Excel)&hellip;</button>
+          <button data-action="exportXlsx">Export Excel workbook (.xlsx)</button>
+          <button data-action="shareExport">Share / export a board&hellip;</button>
           <button data-action="downloadTemplate">Download starter template</button>
           <button data-action="downloadSheetTemplates">Download simple sheet templates</button>
           <div class="sep"></div>
@@ -723,26 +728,28 @@ function loadCSV(text){
   render();
   return true;
 }
-function extraColumnNames(){
+function extraColumnNames(data){
+  const d=data||{people,roles,successors};
   const s=new Set();
-  [...people,...roles,...successors].forEach(e=>Object.keys(e._x||{}).forEach(k=>{if(k&&!CSV_HEADERS.includes(k))s.add(k)}));
+  [...(d.people||[]),...(d.roles||[]),...(d.successors||[])].forEach(e=>Object.keys(e._x||{}).forEach(k=>{if(k&&!CSV_HEADERS.includes(k))s.add(k)}));
   return[...s].sort((a,b)=>a.localeCompare(b));
 }
 function prettyBoardName(id){return String(id||'').replace(/^BOARD[-_]?/i,'').replace(/[-_]+/g,' ').trim().toLowerCase().replace(/\b\w/g,c=>c.toUpperCase())||String(id)}
-function toCSV(){
-  consolidateDuplicateData(false);
-  const extras=extraColumnNames();
+function toCSV(data){
+  if(!data)consolidateDuplicateData(false);
+  const d=data||{boards,people,roles,successors,rules,history,customFieldValues,chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS};
+  const extras=extraColumnNames(d);
   const headers=[...CSV_HEADERS,...extras];
   const rows=[headers.map(csvEsc).join(',')];
   const put=(o,x)=>rows.push(headers.map(h=>csvEsc(CSV_HEADERS.includes(h)?o[h]:(x||{})[h])).join(','));
-  boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).forEach(b=>put({recordType:'BOARD',boardId:b.id,boardName:b.name}));
-  people.forEach(p=>put({recordType:'PERSON',personId:p.id,personName:p.name,personTitle:p.title,personDepartment:p.department,personEmail:p.email,location:p.location,jobLevel:p.jobLevel,performance:p.performance,potential:p.potential,retentionRisk:p.retentionRisk,mobility:p.mobility,criticalExperience:p.criticalExperience,skills:p.skills,readiness:p.readiness,source:p.source,candidateType:p.candidateType,confidence:p.confidence,notes:p.notes},p._x));
-  roles.forEach(r=>put({recordType:'ROLE',boardId:r.boardId,roleId:r.id,roleTitle:r.title,level:r.level,department:r.department,managerRoleId:r.managerRoleId,incumbentPersonId:r.incumbentPersonId,incumbentName:r.incumbentName,risk:r.risk,criticality:r.criticality,owner:r.owner,status:r.status,sortOrder:r.sortOrder},r._x));
-  successors.forEach(s=>put({recordType:'SUCCESSOR',roleId:s.id,successorRoleId:s.roleId,personId:s.personId,readiness:s.readiness,source:s.source,candidateType:s.candidateType,confidence:s.confidence,ranking:s.ranking,notes:s.notes,approved:s.approved,autoMoveQueued:s.autoMoveQueued},s._x));
-  rules.forEach(r=>put({recordType:'RULE',ruleId:r.id,ruleName:r.name,ruleType:r.type,ruleScope:r.scope,ruleField:r.field,ruleOperator:r.operator,ruleValue:r.value,rulePersonId:r.personId,ruleTargetRoleId:r.targetRoleId,ruleAltPersonId:r.altPersonId,ruleSeverity:r.severity,ruleMessage:r.message,ruleEnabled:r.enabled}));
-  history.forEach(h=>put({recordType:'HISTORY',historyId:h.id,historyDate:h.date,historyAction:h.action,historyDetails:h.details}));
-  put({recordType:'SETTING',settingKey:'customFieldValues',settingValue:JSON.stringify(customFieldValues)});
-  put({recordType:'SETTING',settingKey:'chessFields',settingValue:JSON.stringify(chessDefaultFields||CHESS_DEFAULT_FIELDS)});
+  (d.boards||[]).filter(b=>!SYSTEM_BOARDS.includes(b.id)).forEach(b=>put({recordType:'BOARD',boardId:b.id,boardName:b.name}));
+  (d.people||[]).forEach(p=>put({recordType:'PERSON',personId:p.id,personName:p.name,personTitle:p.title,personDepartment:p.department,personEmail:p.email,location:p.location,jobLevel:p.jobLevel,performance:p.performance,potential:p.potential,retentionRisk:p.retentionRisk,mobility:p.mobility,criticalExperience:p.criticalExperience,skills:p.skills,readiness:p.readiness,source:p.source,candidateType:p.candidateType,confidence:p.confidence,notes:p.notes},p._x));
+  (d.roles||[]).forEach(r=>put({recordType:'ROLE',boardId:r.boardId,roleId:r.id,roleTitle:r.title,level:r.level,department:r.department,managerRoleId:r.managerRoleId,incumbentPersonId:r.incumbentPersonId,incumbentName:r.incumbentName,risk:r.risk,criticality:r.criticality,owner:r.owner,status:r.status,sortOrder:r.sortOrder},r._x));
+  (d.successors||[]).forEach(s=>put({recordType:'SUCCESSOR',roleId:s.id,successorRoleId:s.roleId,personId:s.personId,readiness:s.readiness,source:s.source,candidateType:s.candidateType,confidence:s.confidence,ranking:s.ranking,notes:s.notes,approved:s.approved,autoMoveQueued:s.autoMoveQueued},s._x));
+  (d.rules||[]).forEach(r=>put({recordType:'RULE',ruleId:r.id,ruleName:r.name,ruleType:r.type,ruleScope:r.scope,ruleField:r.field,ruleOperator:r.operator,ruleValue:r.value,rulePersonId:r.personId,ruleTargetRoleId:r.targetRoleId,ruleAltPersonId:r.altPersonId,ruleSeverity:r.severity,ruleMessage:r.message,ruleEnabled:r.enabled}));
+  (d.history||[]).forEach(h=>put({recordType:'HISTORY',historyId:h.id,historyDate:h.date,historyAction:h.action,historyDetails:h.details}));
+  put({recordType:'SETTING',settingKey:'customFieldValues',settingValue:JSON.stringify(d.customFieldValues||{})});
+  put({recordType:'SETTING',settingKey:'chessFields',settingValue:JSON.stringify(d.chessFields||chessDefaultFields||CHESS_DEFAULT_FIELDS)});
   return rows.join('\n');
 }
 function downloadTemplate(){
@@ -1843,6 +1850,34 @@ function chessTakeSeat(sid){
   renderChessView();
 }
 function chessResetSeat(){if(chess){chess.stagedIncumbent=null;renderChessView()}}
+function chessRoleGroups(){
+  const lvls=levels();const li=l=>{const i=lvls.indexOf(l);return i<0?99:i};
+  const bySort=(a,b)=>li(a.level)-li(b.level)||(+a.sortOrder||999)-(+b.sortOrder||999);
+  const groups=[];const used=new Set();
+  boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).forEach(b=>{
+    const rs=roles.filter(r=>!used.has(r.id)&&(r.boardId===b.id||b.name===r.department)).sort(bySort);
+    rs.forEach(r=>used.add(r.id));
+    if(rs.length)groups.push({name:b.name,roles:rs});
+  });
+  const rest=roles.filter(r=>!used.has(r.id)).sort(bySort);
+  if(rest.length)groups.push({name:'Other roles',roles:rest});
+  return groups;
+}
+function chessGoTo(rid){
+  if(!chess||!role(rid))return;
+  if(rid===chess.roleId)return;
+  if((chess.dirtyMoves||chess.stagedIncumbent)&&!confirm('Discard the unsaved moves on this board?')){renderChessView();return}
+  const fields=[...chess.fields];
+  chess={roleId:rid,order:slateFor(rid).map(s=>s.id),stagedIncumbent:null,dirtyMoves:false,menuOpen:false,fields,bankQuery:''};
+  renderChessView();
+}
+function chessNav(delta){
+  if(!chess)return;
+  const flat=chessRoleGroups().flatMap(g=>g.roles.map(r=>r.id));
+  if(!flat.length)return;
+  const i=flat.indexOf(chess.roleId);
+  chessGoTo(flat[(i+delta+flat.length)%flat.length]);
+}
 function chessToggleField(f){
   if(!chess)return;
   const i=chess.fields.indexOf(f);
@@ -1942,6 +1977,12 @@ function renderChessView(){
           <div class="bank-list" id="chessBankList">${chessBankListHtml()}</div>
         </div>
       </div>
+    </div>
+    <div class="chess-foot">
+      <button class="btn btn-quiet btn-sm" data-action="chessNav" data-delta="-1" title="Previous role">&#8592; Prev</button>
+      <label for="chessRoleSwitch">Jump to role</label>
+      <select id="chessRoleSwitch">${chessRoleGroups().map(g=>`<optgroup label="${attr(g.name)}">${g.roles.map(x=>`<option value="${attr(x.id)}" ${x.id===r.id?'selected':''}>${esc(x.title)} · ${plur(slateFor(x.id).length,'candidate')}${isRoleVacant(x)?' · VACANT':''}</option>`).join('')}</optgroup>`).join('')}</select>
+      <button class="btn btn-quiet btn-sm" data-action="chessNav" data-delta="1" title="Next role">Next &#8594;</button>
     </div>`;
   el('chessOverlay').classList.remove('hidden');
 }
@@ -2052,6 +2093,7 @@ const ACTIONS={
   chessResetSeat:()=>chessResetSeat(),
   chessFieldsMenu:()=>{if(chess){chess.menuOpen=!chess.menuOpen;renderChessView()}},
   chessRemoveNew:d=>chessRemoveNew(d.entryId),
+  chessNav:d=>chessNav(+d.delta),
   chessSetDefault:()=>chessSetDefaultFields(),
   applyInferred:()=>applyInferredLines(),
   downloadTemplate:()=>{el('moreMenu').classList.remove('open');downloadTemplate()},
@@ -2076,6 +2118,7 @@ document.addEventListener('change',e=>{
   if(t.classList.contains('condField')||t.classList.contains('condOperator'))return updateConditionValue(t);
   if(t.classList.contains('condValueSelect'))return handleRuleValueSelect(t);
   if(t.classList.contains('selAll'))return toggleAllCondValues(t);
+  if(t.id==='chessRoleSwitch')return chessGoTo(t.value);
   if(t.id==='ruleType')return updateRuleTypeUI();
   if(t.id==='ruleBlockOperator')return updateBlockTargetUI();
   if(t.id==='autoTypeSelect')return updateAutoCustomUI();
@@ -2117,24 +2160,25 @@ document.addEventListener('drop',async e=>{
   if(e.dataTransfer.files&&e.dataTransfer.files.length){
     // grab file-system handles synchronously — DataTransfer items are gone after the first await
     const handlePromise=[...(e.dataTransfer.items||[])].map(it=>it.getAsFileSystemHandle?it.getAsFileSystemHandle().catch(()=>null):Promise.resolve(null));
-    const csvFiles=[...e.dataTransfer.files].filter(f=>/\.csv$/i.test(f.name));
-    if(!csvFiles.length){notice('WARN','Only .csv files can be dropped here.');return}
-    const texts=await Promise.all(csvFiles.map(async f=>({name:f.name,text:await f.text()})));
-    const isFullDb=t=>parseCSV(t.text)[0]?.map(h=>h.trim()).includes('recordType');
-    const fulls=texts.filter(isFullDb);
-    if(texts.length===1&&fulls.length===1){
-      if(dirty&&!confirm('Opening this file will replace the unsaved changes on screen. Continue?'))return;
-      if(loadCSV(texts[0].text)){
-        el('dbStatus').textContent=texts[0].name;
-        fileHandle=null;
-        try{const h=await handlePromise[0];if(h&&h.kind==='file'){fileHandle=h;rememberFileHandle(h)}}catch(err){}
-        if(!fileHandle)el('dbStatus').textContent=texts[0].name+' (dropped — use Save/Export to write changes)';
-        bannerState.fileName='';bannerState.backup=null;renderBanners();
+    const allFiles=[...e.dataTransfer.files].filter(f=>/\.(csv|xlsx)$/i.test(f.name));
+    if(!allFiles.length){notice('WARN','Only .csv and .xlsx files can be dropped here.');return}
+    // a single full-database CSV dropped alone = open it (replace + connect);
+    // everything else (simple sheets, Excel workbooks, multiple files) = merge with review
+    if(allFiles.length===1&&/\.csv$/i.test(allFiles[0].name)){
+      const text=await allFiles[0].text();
+      if((parseCSV(text)[0]||[]).map(h=>String(h).trim()).includes('recordType')){
+        if(dirty&&!confirm('Opening this file will replace the unsaved changes on screen. Continue?'))return;
+        if(loadCSV(text)){
+          el('dbStatus').textContent=allFiles[0].name;
+          fileHandle=null;
+          try{const h=await handlePromise[0];if(h&&h.kind==='file'){fileHandle=h;rememberFileHandle(h)}}catch(err){}
+          if(!fileHandle)el('dbStatus').textContent=allFiles[0].name+' (dropped — use Save/Export to write changes)';
+          bannerState.fileName='';bannerState.backup=null;renderBanners();
+        }
+        return;
       }
-      return;
     }
-    if(fulls.length){notice('ERR','Drop the full database file on its own — or drop simple people / roles / candidate sheets together to merge them in.');return}
-    startSheetImport(texts);
+    importFilesFlow(allFiles);
     return;
   }
   const t=e.target.closest('[data-drop]');
@@ -2224,6 +2268,7 @@ function normalizeHeader(h){return String(h||'').toLowerCase().replace(/[_-]+/g,
 function detectSheetType(nh){
   const has=x=>nh.includes(x);
   if(has('recordtype')||has('record type'))return 'FULL';
+  if((has('board id')||has('boardid'))&&(has('board name')||has('boardname')))return 'BOARDS';
   if(has('role title')||has('roletitle'))return 'ROLES';
   if(has('person name')||has('personname')||has('full name'))return 'PEOPLE';
   const roleRef=['role','role id','roleid','successor role id','successorroleid'].some(has);
@@ -2237,6 +2282,7 @@ const SHEET_ALIASES={
   PEOPLE:{'person id':'personId','personid':'personId','id':'personId','employee id':'personId','name':'personName','person name':'personName','personname':'personName','full name':'personName','title':'personTitle','person title':'personTitle','persontitle':'personTitle','current title':'personTitle','department':'personDepartment','dept':'personDepartment','person department':'personDepartment','persondepartment':'personDepartment','email':'personEmail','personemail':'personEmail','email employee id':'personEmail','location':'location','job level':'jobLevel','joblevel':'jobLevel','performance':'performance','potential':'potential','retention risk':'retentionRisk','retentionrisk':'retentionRisk','mobility':'mobility','critical experience':'criticalExperience','criticalexperience':'criticalExperience','skills':'skills','readiness':'readiness','source':'source','candidate type':'candidateType','candidatetype':'candidateType','type':'candidateType','confidence':'confidence','notes':'notes'},
   ROLES:{'role id':'roleId','roleid':'roleId','id':'roleId','role title':'roleTitle','roletitle':'roleTitle','title':'roleTitle','role':'roleTitle','level':'level','department':'department','dept':'department','manager role':'managerRoleId','manager role id':'managerRoleId','managerroleid':'managerRoleId','manager':'managerRoleId','reports to':'managerRoleId','incumbent':'incumbentRef','incumbent person id':'incumbentRef','incumbentpersonid':'incumbentRef','current person':'incumbentRef','incumbent name':'incumbentRef','incumbentname':'incumbentRef','board':'boardRef','board id':'boardRef','boardid':'boardRef','tab':'boardRef','risk':'risk','criticality':'criticality','owner':'owner','status':'status','sort order':'sortOrder','sortorder':'sortOrder'},
   SLATE:{'role':'roleRef','role id':'roleRef','roleid':'roleRef','role title':'roleRef','successor role id':'roleRef','successorroleid':'roleRef','person':'personRef','person id':'personRef','personid':'personRef','candidate':'personRef','ranking':'ranking','rank':'ranking','priority':'ranking','readiness':'readiness','source':'source','candidate type':'candidateType','candidatetype':'candidateType','type':'candidateType','confidence':'confidence','notes':'notes','approved':'approved','auto move queued':'autoMoveQueued','automovequeued':'autoMoveQueued'},
+  BOARDS:{'board id':'boardId','boardid':'boardId','board name':'boardName','boardname':'boardName'},
 };
 const PERSON_KEYMAP={personName:'name',personTitle:'title',personDepartment:'department',personEmail:'email',location:'location',jobLevel:'jobLevel',performance:'performance',potential:'potential',retentionRisk:'retentionRisk',mobility:'mobility',criticalExperience:'criticalExperience',skills:'skills',readiness:'readiness',source:'source',candidateType:'candidateType',confidence:'confidence',notes:'notes'};
 function slugIdIn(list,prefix,label){
@@ -2244,11 +2290,11 @@ function slugIdIn(list,prefix,label){
   let id=base,i=2;
   while(true){const ex=list.find(e=>e.id===id);if(!ex)return id;if(norm(ex.name||ex.title)===norm(label))return id;id=base+'-'+(i++)}
 }
-function buildSheetImport(fileTexts){
-  const staged={people:deepClone(people),roles:deepClone(roles),successors:deepClone(successors),boards:deepClone(boards)};
+function buildSheetImport(fileTexts,dbExtras){
+  const staged={people:deepClone(people),roles:deepClone(roles),successors:deepClone(successors),boards:deepClone(boards),rules:deepClone(rules),history:deepClone(history),customFieldValues:deepClone(customFieldValues)};
   const report=[];
-  const stats={peopleAdded:0,peopleUpdated:0,rolesAdded:0,rolesUpdated:0,slateAdded:0,slateUpdated:0,errors:0,warnings:0};
-  const add=(file,row,sheet,id,field,severity,problem,action)=>{report.push({file,row,sheet,id:id||'',field:field||'',severity,problem,action:action||''});if(severity==='ERROR')stats.errors++;else stats.warnings++};
+  const stats={peopleAdded:0,peopleUpdated:0,rolesAdded:0,rolesUpdated:0,slateAdded:0,slateUpdated:0,errors:0,warnings:0,other:0};
+  const add=(file,row,sheet,id,field,severity,problem,action)=>{report.push({file,row,sheet,id:id||'',field:field||'',severity,problem,action:action||''});if(severity==='ERROR')stats.errors++;else if(severity==='WARNING')stats.warnings++;else stats.other++};
   const findPerson=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=staged.people.find(p=>p.id===ref);if(hit)return hit;const byName=staged.people.filter(p=>norm(p.name)===norm(ref));return byName.length===1?byName[0]:(byName.length?'AMBIG':null)};
   const findRole=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=staged.roles.find(r=>r.id===ref);if(hit)return hit;const byTitle=staged.roles.filter(r=>norm(r.title)===norm(ref));return byTitle.length===1?byTitle[0]:(byTitle.length?'AMBIG':null)};
   const knownReadiness=new Set([...valuesForField('readiness',['Ready Now','1-2 Years','3-5 Years'])].map(norm));
@@ -2264,12 +2310,12 @@ function buildSheetImport(fileTexts){
     if(type==='FULL'){add(ft.name,1,'FULL','','','ERROR','This is a full database file — open it with Open CSV instead of merging it','File skipped');continue}
     parsed.push({ft,type,rawHeaders,nh,rows:rows.slice(1)});
   }
-  const orderOf={PEOPLE:0,ROLES:1,SLATE:2};
+  const orderOf={PEOPLE:0,BOARDS:1,ROLES:2,SLATE:3};
   parsed.sort((a,b)=>orderOf[a.type]-orderOf[b.type]);
 
   for(const sheet of parsed){
     const aliases=SHEET_ALIASES[sheet.type];
-    const label=sheet.type==='PEOPLE'?'People':sheet.type==='ROLES'?'Roles':'Candidates';
+    const label=sheet.type==='PEOPLE'?'People':sheet.type==='ROLES'?'Roles':sheet.type==='BOARDS'?'Boards':'Candidates';
     sheet.rows.forEach((cells,idx)=>{
       const rowNum=idx+2;
       if(!cells.some(c=>String(c||'').trim()))return;
@@ -2329,6 +2375,14 @@ function buildSheetImport(fileTexts){
           r.boardId=b.id;
         }
       }
+      if(sheet.type==='BOARDS'){
+        const bid=String(o.boardId||'').trim(),bnm=String(o.boardName||'').trim();
+        if(!bid&&!bnm)return;
+        if(SYSTEM_BOARDS.includes(bid)){add(sheet.ft.name,rowNum,label,bid,'boardId','WARNING','System tab names are reserved','Row skipped');return}
+        const ex=staged.boards.find(b=>b.id===bid);
+        if(ex){if(bnm&&ex.name!==bnm){ex.name=bnm;add(sheet.ft.name,rowNum,label,bid,'boardName','INFO','Board renamed','Now "'+bnm+'"')}}
+        else staged.boards.push({id:bid||('BOARD-'+(bnm.toUpperCase().replace(/[^A-Z0-9]+/g,'-')||'X')),name:bnm||prettyBoardName(bid)});
+      }
       if(sheet.type==='SLATE'){
         const rRef=findRole(o.roleRef),pRef=findPerson(o.personRef);
         if(!String(o.roleRef||'').trim()||!String(o.personRef||'').trim()){add(sheet.ft.name,rowNum,label,'','','ERROR','Row needs both a Role and a Person','Row skipped');return}
@@ -2350,20 +2404,49 @@ function buildSheetImport(fileTexts){
       }
     });
   }
+  // full-database merges also carry rules / boards / history / settings
+  if(dbExtras){
+    (dbExtras.notes||[]).forEach(n=>add(n.file,n.row||1,n.sheet||'?','','',n.severity||'WARNING',n.problem,n.action));
+    (dbExtras.boards||[]).forEach(b=>{
+      if(!b.id||SYSTEM_BOARDS.includes(b.id))return;
+      const ex=staged.boards.find(x=>x.id===b.id);
+      if(!ex){staged.boards.push({id:b.id,name:b.name||prettyBoardName(b.id)});add(b._file||'merge',1,'Boards',b.id,'','INFO','Board tab added: '+(b.name||b.id),'')}
+      else if(b.name&&ex.name!==b.name){ex.name=b.name;add(b._file||'merge',1,'Boards',b.id,'','INFO','Board renamed to "'+b.name+'"','')}
+    });
+    (dbExtras.rules||[]).forEach(r=>{
+      if(!r.id)return;
+      const ex=staged.rules.find(x=>x.id===r.id);
+      const clean={...r};delete clean._file;
+      if(!ex){staged.rules.push(clean);add(r._file||'merge',1,'Rules',r.id,'','INFO','Rule added: '+(r.name||r.id),'')}
+      else if(JSON.stringify(ex)!==JSON.stringify(clean)){Object.assign(ex,clean);add(r._file||'merge',1,'Rules',r.id,'','INFO','Rule updated: '+(r.name||r.id),'')}
+    });
+    const seenH=new Set(staged.history.map(h=>h.id));
+    let hAdded=0;
+    (dbExtras.history||[]).forEach(h=>{if(h.id&&!seenH.has(h.id)){staged.history.push({id:h.id,date:h.date,action:h.action,details:h.details});seenH.add(h.id);hAdded++}});
+    if(hAdded){staged.history.sort((a,b)=>String(b.date).localeCompare(String(a.date)));add('merge',1,'History','','','INFO',plur(hAdded,'history entry')+' merged in','')}
+    if(dbExtras.customFieldValues){
+      let cAdded=0;
+      Object.entries(dbExtras.customFieldValues).forEach(([k,vals])=>{
+        (vals||[]).forEach(val=>{if(!(staged.customFieldValues[k]||[]).includes(val)){(staged.customFieldValues[k]=staged.customFieldValues[k]||[]).push(val);cAdded++}});
+      });
+      if(cAdded)add('merge',1,'Settings','','','INFO',plur(cAdded,'custom dropdown value')+' merged in','');
+    }
+  }
   // renumber every touched slate 1..n
   const byRole=new Map();
   staged.successors.forEach(s=>{const a=byRole.get(s.roleId);if(a)a.push(s);else byRole.set(s.roleId,[s])});
   byRole.forEach(a=>a.sort((m,n)=>(+m.ranking||999)-(+n.ranking||999)).forEach((s,i)=>s.ranking=i+1));
   return{staged,report,stats,files:fileTexts.map(f=>f.name)};
 }
-function startSheetImport(fileTexts){
-  if(!fileTexts||!fileTexts.length)return;
-  openImportReview(buildSheetImport(fileTexts));
+function startSheetImport(fileTexts,dbExtras){
+  if((!fileTexts||!fileTexts.length)&&!dbExtras)return;
+  openImportReview(buildSheetImport(fileTexts||[],dbExtras));
 }
 function openImportReview(review){
   importReview=review;lastImportReport=review.report;
   const s=review.stats;
-  const issueRows=review.report.slice(0,200).map(i=>`<tr><td>${i.severity==='ERROR'?'<span class="badge red">Error</span>':'<span class="badge amber">Warning</span>'}</td><td style="white-space:nowrap">${esc(i.file)} · row ${i.row}</td><td>${esc(i.sheet)}</td><td>${esc(i.id)}</td><td>${esc(i.problem)}</td><td>${esc(i.action)}</td></tr>`).join('');
+  const sevBadge=s=>s==='ERROR'?'<span class="badge red">Error</span>':s==='WARNING'?'<span class="badge amber">Warning</span>':'<span class="badge gray">Info</span>';
+  const issueRows=review.report.slice(0,200).map(i=>`<tr><td>${sevBadge(i.severity)}</td><td style="white-space:nowrap">${esc(i.file)} · row ${i.row}</td><td>${esc(i.sheet)}</td><td>${esc(i.id)}</td><td>${esc(i.problem)}</td><td>${esc(i.action)}</td></tr>`).join('');
   openDrawer('Import Review','Sheets: '+review.files.join(', ')+' — nothing is saved until you press Apply Import.',
     `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
       <div class="kpi"><b>${s.peopleAdded+s.peopleUpdated}</b><small>People</small><div class="sub">${s.peopleAdded} new · ${s.peopleUpdated} updated</div></div>
@@ -2371,6 +2454,7 @@ function openImportReview(review){
       <div class="kpi"><b>${s.slateAdded+s.slateUpdated}</b><small>Slate rows</small><div class="sub">${s.slateAdded} new · ${s.slateUpdated} updated</div></div>
       <div class="kpi"><b style="${s.errors?'color:var(--red)':''}">${s.errors}</b><small>Errors</small><div class="sub">rows skipped</div></div>
       <div class="kpi"><b style="${s.warnings?'color:var(--amber)':''}">${s.warnings}</b><small>Warnings</small><div class="sub">imported, check them</div></div>
+      ${s.other?`<div class="kpi"><b>${s.other}</b><small>Other updates</small><div class="sub">rules, tabs, history, settings</div></div>`:''}
     </div>`+
     (review.report.length
       ?`<div class="tablebox"><table class="table"><thead><tr><th></th><th>Where</th><th>Sheet</th><th>Record</th><th>Problem</th><th>What was done</th></tr></thead><tbody>${issueRows}</tbody></table>${review.report.length>200?`<div class="tfoot-note">Showing 200 of ${review.report.length} — the downloadable report has everything.</div>`:''}</div>`
@@ -2383,6 +2467,7 @@ function applyImport(){
   if(!importReview)return;
   pushUndo('Import sheets');
   people=importReview.staged.people;roles=importReview.staged.roles;successors=importReview.staged.successors;boards=importReview.staged.boards;
+  rules=importReview.staged.rules;history=importReview.staged.history;customFieldValues=importReview.staged.customFieldValues;
   const s=importReview.stats;
   log('Sheets Imported',`${importReview.files.join(', ')} — people +${s.peopleAdded}/upd ${s.peopleUpdated}, roles +${s.rolesAdded}/upd ${s.rolesUpdated}, slate +${s.slateAdded}/upd ${s.slateUpdated}, ${s.errors} errors, ${s.warnings} warnings`);
   notice(s.errors?'WARN':'OK',s.errors?`Import applied — ${s.errors} row(s) were skipped. Use ⋯ → the error report to fix and re-import them.`:'Import applied cleanly.');
@@ -2429,6 +2514,250 @@ Object.assign(window.__APP__,{startSheetImport,buildSheetImport,applyImport,buil
 Object.defineProperty(window.__APP__,'importReview',{get:()=>importReview});
 Object.defineProperty(window.__APP__,'bannerState',{get:()=>bannerState});
 window.__APP__.setReconnectHandle=h=>{reconnectHandle=h;bannerState.fileName=h&&h.name||'';renderBanners()};
+</script>
+<script>
+'use strict';
+/* =====================================================================
+   Excel (.xlsx) support — a minimal self-contained writer & reader.
+   An xlsx file is a zip of XML parts; we write STORE-only zips and read
+   both STORE and DEFLATE (via DecompressionStream) entries.
+   ===================================================================== */
+const CRC_TABLE=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0}return t})();
+function crc32(u8){let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=CRC_TABLE[(c^u8[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
+function makeZip(files){
+  const enc=new TextEncoder();const chunks=[];const central=[];let offset=0;
+  const num=(n,b)=>{const a=new Uint8Array(b);for(let i=0;i<b;i++)a[i]=(n>>>(8*i))&0xFF;return a};
+  for(const f of files){
+    const name=enc.encode(f.name);const crc=crc32(f.data);
+    [num(0x04034b50,4),num(20,2),num(0,2),num(0,2),num(0,2),num(0,2),num(crc,4),num(f.data.length,4),num(f.data.length,4),num(name.length,2),num(0,2),name,f.data].forEach(c=>chunks.push(c));
+    central.push({name,crc,size:f.data.length,offset});
+    offset+=30+name.length+f.data.length;
+  }
+  let cdSize=0;const cdStart=offset;
+  for(const e of central){
+    [num(0x02014b50,4),num(20,2),num(20,2),num(0,2),num(0,2),num(0,2),num(0,2),num(e.crc,4),num(e.size,4),num(e.size,4),num(e.name.length,2),num(0,2),num(0,2),num(0,2),num(0,2),num(0,4),num(e.offset,4),e.name].forEach(c=>chunks.push(c));
+    cdSize+=46+e.name.length;
+  }
+  [num(0x06054b50,4),num(0,2),num(0,2),num(central.length,2),num(central.length,2),num(cdSize,4),num(cdStart,4),num(0,2)].forEach(c=>chunks.push(c));
+  let total=0;chunks.forEach(c=>total+=c.length);
+  const out=new Uint8Array(total);let p=0;chunks.forEach(c=>{out.set(c,p);p+=c.length});
+  return out;
+}
+function xmlEsc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function xmlUnesc(s){return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&#x?[0-9a-fA-F]+;/g,m=>{const code=m[2]==='x'||m[2]==='X'?parseInt(m.slice(3,-1),16):parseInt(m.slice(2,-1),10);return String.fromCodePoint(code)}).replace(/&amp;/g,'&')}
+function colLetters(i){let s='';i++;while(i){s=String.fromCharCode(65+(i-1)%26)+s;i=Math.floor((i-1)/26)}return s}
+function colIndex(letters){let n=0;for(const ch of letters)n=n*26+(ch.charCodeAt(0)-64);return n-1}
+function sheetXml(rows){
+  const body=rows.map((r,ri)=>`<row r="${ri+1}">`+r.map((c,ci)=>{const v=String(c??'');if(v==='')return'';return `<c r="${colLetters(ci)}${ri+1}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`}).join('')+'</row>').join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+}
+function makeXlsx(sheets){
+  const enc=s=>new TextEncoder().encode(s);
+  const files=[
+    {name:'[Content_Types].xml',data:enc(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`)},
+    {name:'_rels/.rels',data:enc(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`)},
+    {name:'xl/workbook.xml',data:enc(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s,i)=>`<sheet name="${xmlEsc(String(s.name).slice(0,31))}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets></workbook>`)},
+    {name:'xl/_rels/workbook.xml.rels',data:enc(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')}</Relationships>`)},
+  ];
+  sheets.forEach((s,i)=>files.push({name:`xl/worksheets/sheet${i+1}.xml`,data:enc(sheetXml(s.rows))}));
+  return makeZip(files);
+}
+async function unzip(buf){
+  const u8=buf instanceof Uint8Array?buf:new Uint8Array(buf);
+  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+  let e=-1;
+  for(let i=u8.length-22;i>=Math.max(0,u8.length-22-65536);i--){if(dv.getUint32(i,true)===0x06054b50){e=i;break}}
+  if(e<0)throw new Error('Not a valid .xlsx/zip file');
+  const count=dv.getUint16(e+10,true);let off=dv.getUint32(e+16,true);
+  const td=new TextDecoder();const out={};
+  for(let n=0;n<count;n++){
+    if(dv.getUint32(off,true)!==0x02014b50)throw new Error('Corrupt xlsx (central directory)');
+    const method=dv.getUint16(off+10,true),csize=dv.getUint32(off+20,true),nameLen=dv.getUint16(off+28,true),extraLen=dv.getUint16(off+30,true),cmtLen=dv.getUint16(off+32,true),lho=dv.getUint32(off+42,true);
+    const name=td.decode(u8.subarray(off+46,off+46+nameLen));
+    const lNameLen=dv.getUint16(lho+26,true),lExtraLen=dv.getUint16(lho+28,true);
+    const start=lho+30+lNameLen+lExtraLen;
+    const raw=u8.slice(start,start+csize);
+    if(method===0)out[name]=raw;
+    else if(method===8){
+      if(typeof DecompressionStream==='undefined')throw new Error('This browser cannot decompress xlsx files — export the tabs as CSV instead');
+      const res=new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw')));
+      out[name]=new Uint8Array(await res.arrayBuffer());
+    }else throw new Error('Unsupported xlsx compression method '+method);
+    off+=46+nameLen+extraLen+cmtLen;
+  }
+  return out;
+}
+async function readXlsx(buf){
+  const files=await unzip(buf);
+  const td=new TextDecoder();
+  const get=n=>files[n]?td.decode(files[n]):'';
+  const wb=get('xl/workbook.xml');
+  if(!wb)throw new Error('No workbook.xml found — is this really an Excel file?');
+  const rels={};[...get('xl/_rels/workbook.xml.rels').matchAll(/<Relationship[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)].forEach(m=>rels[m[1]]=m[2]);
+  const shared=[...get('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)].map(m=>[...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(t=>xmlUnesc(t[1])).join(''));
+  const sheets=[];
+  for(const m of wb.matchAll(/<sheet [^>]*name="([^"]*)"[^>]*r:id="([^"]+)"[^>]*\/?>/g)){
+    let target=rels[m[2]]||'';
+    if(!target)continue;
+    target=target.startsWith('/')?target.slice(1):'xl/'+target.replace(/^\.\//,'');
+    const xml=get(target);
+    if(!xml)continue;
+    const rows=[];
+    for(const rm of xml.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)){
+      const cells=[];
+      for(const cm of rm[1].matchAll(/<c\s([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
+        const attrs=cm[1],inner=cm[2]||'';
+        const ref=/r="([A-Z]+)\d+"/.exec(attrs);
+        const col=ref?colIndex(ref[1]):cells.length;
+        const type=(/t="([^"]+)"/.exec(attrs)||[])[1]||'n';
+        let val='';
+        if(type==='s'){const v=/<v>([\s\S]*?)<\/v>/.exec(inner);val=shared[Number((v||[])[1]||0)]||''}
+        else if(type==='inlineStr'){val=[...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(t=>xmlUnesc(t[1])).join('')}
+        else{const v=/<v>([\s\S]*?)<\/v>/.exec(inner);val=v?xmlUnesc(v[1]):''}
+        cells[col]=val;
+      }
+      rows.push(Array.from(cells,c=>c??''));
+    }
+    sheets.push({name:xmlUnesc(m[1]),rows});
+  }
+  return sheets;
+}
+function rowsToCsvText(rows){return rows.map(r=>r.map(csvEsc).join(',')).join('\n')}
+
+/* ---------- workbook build (export + share) ---------- */
+function workbookSheets(data){
+  const d=data||{people,roles,successors,rules,boards};
+  const xKeys=list=>{const s=new Set();(list||[]).forEach(e=>Object.keys(e._x||{}).forEach(k=>s.add(k)));return[...s].sort((a,b)=>a.localeCompare(b))};
+  const px=xKeys(d.people),rx=xKeys(d.roles),sx=xKeys(d.successors);
+  const peopleRows=[['Person ID','Name','Title','Department','Email','Location','Job Level','Performance','Potential','Retention Risk','Mobility','Critical Experience','Skills','Readiness','Source','Candidate Type','Confidence','Notes',...px],
+    ...(d.people||[]).map(p=>[p.id,p.name,p.title,p.department,p.email,p.location,p.jobLevel,p.performance,p.potential,p.retentionRisk,p.mobility,p.criticalExperience,p.skills,p.readiness,p.source,p.candidateType,p.confidence,p.notes,...px.map(k=>(p._x||{})[k]||'')])];
+  const roleRows=[['Role ID','Role Title','Level','Department','Manager Role','Incumbent','Board','Risk','Criticality','Owner','Status','Sort Order',...rx],
+    ...(d.roles||[]).map(r=>[r.id,r.title,r.level,r.department,r.managerRoleId,r.incumbentPersonId,r.boardId,r.risk,r.criticality,r.owner,r.status,r.sortOrder,...rx.map(k=>(r._x||{})[k]||'')])];
+  const slateRows=[['Role','Person','Ranking','Readiness','Candidate Type','Source','Confidence','Notes','Approved','Auto Move Queued',...sx],
+    ...(d.successors||[]).map(s=>[s.roleId,s.personId,s.ranking,s.readiness,s.candidateType,s.source,s.confidence,s.notes,s.approved,s.autoMoveQueued,...sx.map(k=>(s._x||{})[k]||'')])];
+  const boardRows=[['Board ID','Board Name'],...(d.boards||[]).filter(b=>!SYSTEM_BOARDS.includes(b.id)).map(b=>[b.id,b.name])];
+  const sheets=[{name:'People',rows:peopleRows},{name:'Roles',rows:roleRows},{name:'Candidates',rows:slateRows},{name:'Boards',rows:boardRows}];
+  if((d.rules||[]).length)sheets.push({name:'Rules (view only)',rows:[['Rule ID','Name','Type','Severity','Enabled','What it does','Message'],...(d.rules||[]).map(r=>[r.id,r.name,r.type,r.severity,r.enabled,ruleSummary(r),r.message])]});
+  return sheets;
+}
+function downloadBytes(name,bytes,type){const blob=new Blob([bytes],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url)}
+function exportXlsxWorkbook(){
+  consolidateDuplicateData(false);
+  downloadBytes('succession_planner_workbook.xlsx',makeXlsx(workbookSheets()),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  notice('OK','Excel workbook exported — People / Roles / Candidates / Boards tabs. Edit it and Import & merge it back.');
+}
+
+/* ---------- full-database merge (for shared files coming back) ---------- */
+function parseFullDbText(text){
+  const rows=parseCSV(String(text||''));
+  if(rows.length<2)return null;
+  const headers=rows[0].map(h=>h.trim());
+  if(!headers.includes('recordType'))return null;
+  const extraCols=headers.filter(h=>h&&!CSV_HEADERS.includes(h));
+  const grab=o=>extraCols.length?Object.fromEntries(extraCols.map(h=>[h,o[h]||''])):undefined;
+  const d={people:[],roles:[],successors:[],rules:[],boards:[],history:[],customFieldValues:null};
+  rows.slice(1).forEach(row=>{
+    const o={};headers.forEach((h,i)=>o[h]=row[i]||'');
+    if(!Object.values(o).some(v=>String(v).trim()))return;
+    if(o.recordType==='BOARD'&&o.boardId)d.boards.push({id:o.boardId,name:o.boardName||prettyBoardName(o.boardId)});
+    if(o.recordType==='PERSON'&&o.personId)d.people.push({id:o.personId,name:o.personName,title:o.personTitle,department:o.personDepartment,email:o.personEmail,location:o.location,jobLevel:o.jobLevel,performance:o.performance,potential:o.potential,retentionRisk:o.retentionRisk,mobility:o.mobility,criticalExperience:o.criticalExperience,skills:o.skills,readiness:o.readiness,source:o.source,candidateType:o.candidateType,confidence:o.confidence,notes:o.notes,_x:grab(o)});
+    if(o.recordType==='ROLE'&&o.roleId)d.roles.push({id:o.roleId,title:o.roleTitle,level:o.level,department:o.department,boardId:o.boardId,managerRoleId:o.managerRoleId,incumbentPersonId:o.incumbentPersonId,incumbentName:o.incumbentName,risk:o.risk,criticality:o.criticality,owner:o.owner,status:o.status,sortOrder:o.sortOrder,_x:grab(o)});
+    if(o.recordType==='SUCCESSOR'&&o.successorRoleId&&o.personId)d.successors.push({roleId:o.successorRoleId,personId:o.personId,readiness:o.readiness,source:o.source,candidateType:o.candidateType,confidence:o.confidence,ranking:o.ranking,notes:o.notes,approved:o.approved,autoMoveQueued:o.autoMoveQueued,_x:grab(o)});
+    if(o.recordType==='RULE'&&o.ruleId){let op=o.ruleOperator;if((o.ruleType||'FIELD_RULE')==='BLOCK'&&!op&&!o.ruleTargetRoleId)op='cannot change role';d.rules.push({id:o.ruleId,name:o.ruleName,type:o.ruleType||'FIELD_RULE',scope:o.ruleScope||'Candidate',field:o.ruleField,operator:op,value:o.ruleValue,personId:o.rulePersonId,targetRoleId:o.ruleTargetRoleId,altPersonId:o.ruleAltPersonId,severity:o.ruleSeverity||'Needs Review',message:o.ruleMessage,enabled:String(o.ruleEnabled).toLowerCase()!=='false'})}
+    if(o.recordType==='HISTORY'&&o.historyId)d.history.push({id:o.historyId,date:o.historyDate,action:o.historyAction,details:o.historyDetails});
+    if(o.recordType==='SETTING'&&o.settingKey==='customFieldValues'){try{d.customFieldValues=JSON.parse(o.settingValue||'{}')||{}}catch(e){}}
+  });
+  return d;
+}
+function fullDbToImportInputs(name,text){
+  const d=parseFullDbText(text);
+  if(!d)return null;
+  const xKeys=list=>{const s=new Set();list.forEach(e=>Object.keys(e._x||{}).forEach(k=>s.add(k)));return[...s].sort()};
+  const px=xKeys(d.people),rx=xKeys(d.roles),sx=xKeys(d.successors);
+  const texts=[];
+  if(d.people.length)texts.push({name:name+' [people]',text:rowsToCsvText([['Person ID','Name','Title','Department','Email','Location','Job Level','Performance','Potential','Retention Risk','Mobility','Critical Experience','Skills','Readiness','Source','Candidate Type','Confidence','Notes',...px],...d.people.map(p=>[p.id,p.name,p.title,p.department,p.email,p.location,p.jobLevel,p.performance,p.potential,p.retentionRisk,p.mobility,p.criticalExperience,p.skills,p.readiness,p.source,p.candidateType,p.confidence,p.notes,...px.map(k=>(p._x||{})[k]||'')])])});
+  if(d.roles.length)texts.push({name:name+' [roles]',text:rowsToCsvText([['Role ID','Role Title','Level','Department','Manager Role','Incumbent','Board','Risk','Criticality','Owner','Status','Sort Order',...rx],...d.roles.map(r=>[r.id,r.title,r.level,r.department,r.managerRoleId,r.incumbentPersonId,r.boardId,r.risk,r.criticality,r.owner,r.status,r.sortOrder,...rx.map(k=>(r._x||{})[k]||'')])])});
+  if(d.successors.length)texts.push({name:name+' [candidates]',text:rowsToCsvText([['Role','Person','Ranking','Readiness','Candidate Type','Source','Confidence','Notes','Approved','Auto Move Queued',...sx],...d.successors.map(s=>[s.roleId,s.personId,s.ranking,s.readiness,s.candidateType,s.source,s.confidence,s.notes,s.approved,s.autoMoveQueued,...sx.map(k=>(s._x||{})[k]||'')])])});
+  const tag=list=>list.map(e=>({...e,_file:name}));
+  return{texts,extras:{rules:tag(d.rules),boards:tag(d.boards),history:d.history,customFieldValues:d.customFieldValues}};
+}
+async function importFilesFlow(files){
+  const texts=[];const extras={rules:[],boards:[],history:[],customFieldValues:{},notes:[]};
+  let any=false;
+  for(const f of files){
+    if(/\.xlsx$/i.test(f.name)){
+      let sheets;
+      try{sheets=await readXlsx(await f.arrayBuffer())}
+      catch(e){extras.notes.push({file:f.name,severity:'ERROR',problem:'Could not read the Excel file: '+e.message,action:'File skipped'});any=true;continue}
+      for(const sh of sheets){
+        if(!sh.rows.length)continue;
+        const type=detectSheetType(sh.rows[0].map(normalizeHeader));
+        if(type&&type!=='FULL'){texts.push({name:f.name+' ▸ '+sh.name,text:rowsToCsvText(sh.rows)});any=true}
+        else extras.notes.push({file:f.name+' ▸ '+sh.name,severity:'INFO',problem:'Sheet skipped (view-only or unrecognized layout)',action:''});
+      }
+    }else if(/\.csv$/i.test(f.name)){
+      const text=await f.text();
+      const headers=parseCSV(text)[0]||[];
+      if(headers.map(h=>String(h).trim()).includes('recordType')){
+        const inputs=fullDbToImportInputs(f.name,text);
+        if(inputs){texts.push(...inputs.texts);extras.rules.push(...inputs.extras.rules);extras.boards.push(...inputs.extras.boards);extras.history.push(...(inputs.extras.history||[]));
+          Object.entries(inputs.extras.customFieldValues||{}).forEach(([k,v])=>{extras.customFieldValues[k]=[...(extras.customFieldValues[k]||[]),...(v||[])]});
+          any=true;}
+      }else{texts.push({name:f.name,text});any=true}
+    }
+  }
+  if(!any&&!extras.notes.length){notice('WARN','No .csv or .xlsx files to import.');return}
+  startSheetImport(texts,extras);
+}
+function pickImportFiles(){
+  const input=document.createElement('input');
+  input.type='file';input.accept='.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';input.multiple=true;
+  input.onchange=()=>importFilesFlow([...input.files]);
+  input.click();
+}
+
+/* ---------- share / scoped export ---------- */
+function buildScopedData(tabId){
+  if(tabId==='ALL')return{boards:deepClone(boards),people:deepClone(people),roles:deepClone(roles),successors:deepClone(successors),rules:deepClone(rules),history:[],customFieldValues:deepClone(customFieldValues),chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS};
+  const b=boards.find(x=>x.id===tabId);
+  if(!b)return null;
+  const rolesSub=roles.filter(r=>r.boardId===tabId||b.name===r.department);
+  const rids=new Set(rolesSub.map(r=>r.id));
+  const succSub=successors.filter(s=>rids.has(s.roleId));
+  const pids=new Set([...rolesSub.map(r=>r.incumbentPersonId),...succSub.map(s=>s.personId)].filter(Boolean));
+  return{boards:[deepClone(b)],people:deepClone(people.filter(p=>pids.has(p.id))),roles:deepClone(rolesSub),successors:deepClone(succSub),rules:[],history:[],customFieldValues:deepClone(customFieldValues),chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS};
+}
+function openShareDrawer(){
+  const customs=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id));
+  openDrawer('Share / Export a Board','Export one board (its roles, the people on those slates, and their slate rows) to hand to someone else. When they send it back, use Import & merge — new and changed records are calculated against your database.',
+    `<div class="grid">
+      <div><label>What to export</label><select id="shareScope"><option value="ALL">Everything (all boards)</option>${customs.map(b=>`<option value="${attr(b.id)}">${esc(b.name)} board only</option>`).join('')}</select></div>
+      <div><label>Format</label><select id="shareFormat"><option value="csv">Planner CSV (opens in this app)</option><option value="xlsx">Excel workbook (tabs, easy to read)</option></select></div>
+    </div>
+    <div class="form-note" style="margin-top:14px"><b>How the round trip works:</b> the other person opens the CSV in their own copy of the planner (they will only see this board) or edits the Excel tabs directly. When they return the file, use ⋯ &rarr; Import &amp; merge — you get a review of everything new or changed, with an error report for anything broken, before it touches your database. Deletions don&rsquo;t sync — remove records here in the master.</div>`,
+    ()=>{
+      const scope=v('shareScope'),fmt=v('shareFormat');
+      const data=buildScopedData(scope);
+      if(!data){notice('ERR','Board not found.');return}
+      const label=scope==='ALL'?'all_boards':scope.toLowerCase().replace(/[^a-z0-9]+/g,'_');
+      if(fmt==='xlsx')downloadBytes(`succession_share_${label}.xlsx`,makeXlsx(workbookSheets(data)),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      else download(`succession_share_${label}.csv`,toCSV(data),'text/csv');
+      log('Board Shared',`Exported ${scope==='ALL'?'all boards':boards.find(x=>x.id===scope)?.name||scope} as ${fmt.toUpperCase()}`);
+      notice('OK','Share file exported.');
+      closeDrawer();
+    });
+  el('drawerSave').textContent='Export';
+}
+Object.assign(ACTIONS,{
+  exportXlsx:()=>{el('moreMenu').classList.remove('open');exportXlsxWorkbook()},
+  shareExport:()=>{el('moreMenu').classList.remove('open');openShareDrawer()},
+  importSheets:()=>{el('moreMenu').classList.remove('open');pickImportFiles()},
+});
+Object.assign(window.__APP__,{makeXlsx,readXlsx,makeZip,unzip,workbookSheets,rowsToCsvText,exportXlsxWorkbook,parseFullDbText,fullDbToImportInputs,importFilesFlow,buildScopedData,openShareDrawer,chessGoTo,chessNav,chessRoleGroups,
+  buildWorkbookBytes:()=>makeXlsx(workbookSheets()),
+  importXlsxBuffer:async(buf,name)=>{const sheets=await readXlsx(buf);const texts=[];const notes=[];sheets.forEach(sh=>{if(!sh.rows.length)return;const type=detectSheetType(sh.rows[0].map(normalizeHeader));if(type&&type!=='FULL')texts.push({name:(name||'workbook.xlsx')+' ▸ '+sh.name,text:rowsToCsvText(sh.rows)});else notes.push({file:sh.name,severity:'INFO',problem:'Sheet skipped',action:''})});startSheetImport(texts,{notes})},
+  importFullDbText:(name,text)=>{const inputs=fullDbToImportInputs(name,text);if(inputs)startSheetImport(inputs.texts,inputs.extras)},
+});
 </script>
 </body>
 </html>

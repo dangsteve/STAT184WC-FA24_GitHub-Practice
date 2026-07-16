@@ -1426,7 +1426,133 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     16. SCREENSHOTS for the report
+     16. EXCEL (.xlsx) & SHARE / MERGE-BACK
+     =================================================================== */
+  section('16. Excel & share/merge-back');
+  await test('chess footer: jump-to-role dropdown and prev/next switch boards', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    assert(await page.locator('#chessRoleSwitch').count() === 1, 'switcher rendered');
+    await setSelect(page, 'chessRoleSwitch', 'R-CFO');
+    assertEq(await page.evaluate(() => __APP__.chess.roleId), 'R-CFO', 'dropdown switches the board');
+    await page.click('[data-action="chessNav"][data-delta="1"]');
+    const after = await page.evaluate(() => __APP__.chess.roleId);
+    assert(after && after !== 'R-CFO', 'next arrow moves to another role');
+    // staged move + switch asks to discard
+    const order = await page.evaluate(() => [...__APP__.chess.order]);
+    if (order.length >= 2) {
+      await simulateDrag(page, `#chessOverlay .square[data-succ-id="${order[0]}"]`, `#chessOverlay .square[data-succ-id="${order[1]}"]`);
+      dialogs = [];
+      await setSelect(page, 'chessRoleSwitch', 'R-CEO');
+      assert(dialogs.length === 1 && dialogs[0].message.includes('Discard'), 'discard confirm on switch');
+      assertEq(await page.evaluate(() => __APP__.chess.roleId), 'R-CEO', 'switched after confirm');
+    }
+    await page.evaluate(() => __APP__.closeChessView(true));
+  });
+  await test('Excel workbook export → import round-trips the whole database', async () => {
+    await loadBase(page);
+    const before = await csvOf(page);
+    const res = await page.evaluate(async () => {
+      const bytes = __APP__.buildWorkbookBytes();
+      const sheets = await __APP__.readXlsx(bytes);
+      await __APP__.importXlsxBuffer(bytes, 'roundtrip.xlsx');
+      return { names: sheets.map(s => s.name), stats: __APP__.importReview.stats, size: bytes.length };
+    });
+    ['People', 'Roles', 'Candidates', 'Boards'].forEach(n => assert(res.names.includes(n), 'workbook has tab ' + n));
+    assertEq(res.stats.errors, 0, 'no errors');
+    assertEq(res.stats.peopleAdded, 0, 'nothing spuriously new');
+    assertEq(res.stats.peopleUpdated, 150, 'all people matched');
+    assertEq(res.stats.rolesUpdated, 72, 'all roles matched');
+    assert(res.stats.slateUpdated >= 280, 'all slate rows matched');
+    await page.click('#drawerSave'); // Apply Import
+    const strip = t => t.split('\n').filter(l => !l.startsWith('HISTORY')).join('\n');
+    assertEq(strip(await csvOf(page)), strip(before), 'database identical after Excel round trip');
+  });
+  await test('reads real-world xlsx: DEFLATE compression + sharedStrings', async () => {
+    const zlib = require('zlib');
+    const num = (n, b) => { const buf = Buffer.alloc(b); buf.writeUIntLE(n >>> 0, 0, b); return buf; };
+    const nodeZip = entries => {
+      const chunks = []; const central = []; let offset = 0;
+      for (const e of entries) {
+        const name = Buffer.from(e.name); const comp = zlib.deflateRawSync(e.data); const crc = zlib.crc32(e.data) >>> 0;
+        chunks.push(num(0x04034b50, 4), num(20, 2), num(0, 2), num(8, 2), num(0, 2), num(0, 2), num(crc, 4), num(comp.length, 4), num(e.data.length, 4), num(name.length, 2), num(0, 2), name, comp);
+        central.push({ name, crc, csize: comp.length, usize: e.data.length, offset });
+        offset += 30 + name.length + comp.length;
+      }
+      const cdStart = offset; let cdSize = 0;
+      for (const e of central) {
+        chunks.push(num(0x02014b50, 4), num(20, 2), num(20, 2), num(0, 2), num(8, 2), num(0, 2), num(0, 2), num(e.crc, 4), num(e.csize, 4), num(e.usize, 4), num(e.name.length, 2), num(0, 2), num(0, 2), num(0, 2), num(0, 2), num(0, 4), num(e.offset, 4), e.name);
+        cdSize += 46 + e.name.length;
+      }
+      chunks.push(num(0x06054b50, 4), num(0, 2), num(0, 2), num(central.length, 2), num(central.length, 2), num(cdSize, 4), num(cdStart, 4), num(0, 2));
+      return Buffer.concat(chunks);
+    };
+    const buf = nodeZip([
+      { name: 'xl/workbook.xml', data: Buffer.from('<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="People" sheetId="1" r:id="rId1"/></sheets></workbook>') },
+      { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>') },
+      { name: 'xl/sharedStrings.xml', data: Buffer.from('<?xml version="1.0"?><sst><si><t>Person ID</t></si><si><t>Name</t></si><si><t>Readiness</t></si><si><t>P-XL1</t></si><si><t>Excel Deflate Person</t></si><si><t>Ready Now</t></si></sst>') },
+      { name: 'xl/worksheets/sheet1.xml', data: Buffer.from('<?xml version="1.0"?><worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row><row r="2"><c r="A2" t="s"><v>3</v></c><c r="B2" t="s"><v>4</v></c><c r="C2" t="s"><v>5</v></c></row></sheetData></worksheet>') },
+    ]);
+    await loadBase(page);
+    const rows = await page.evaluate(async b64 => {
+      const bin = atob(b64); const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const sheets = await __APP__.readXlsx(u8);
+      await __APP__.importXlsxBuffer(u8, 'excel_native.xlsx');
+      return sheets[0].rows;
+    }, buf.toString('base64'));
+    assertEq(rows[1].join('|'), 'P-XL1|Excel Deflate Person|Ready Now', 'deflate + sharedStrings decoded');
+    await page.click('#drawerSave');
+    assert(await page.evaluate(() => __APP__.people.some(p => p.id === 'P-XL1')), 'person from Excel-native file imported');
+  });
+  await test('share one board: scoped export contains only that board and its people', async () => {
+    await loadBase(page);
+    const scoped = await page.evaluate(() => { const d = __APP__.buildScopedData('BOARD-PROD'); return { csv: __APP__.toCSV(d), roles: d.roles.length, people: d.people.length, total: __APP__.roles.length }; });
+    assert(scoped.roles > 0 && scoped.roles < scoped.total, 'subset is a strict slice');
+    await page.evaluate(t => __APP__.loadCSV(t), scoped.csv); // recipient opens it
+    const rec = await counts(page);
+    assertEq(rec.roles, scoped.roles, 'recipient sees only the shared board roles');
+    assertEq(rec.people, scoped.people, 'and only the referenced people');
+    assertEq(await page.evaluate(() => __APP__.boards.filter(b => !['MASTER', 'ALL', 'PEOPLE', 'INSIGHTS', 'RULES', 'HISTORY'].includes(b.id)).length), 1, 'one board tab');
+  });
+  await test('merge-back calculates updates and unique additions from the returned file', async () => {
+    await loadBase(page);
+    const scopedCsv = await page.evaluate(() => __APP__.toCSV(__APP__.buildScopedData('BOARD-PROD')));
+    // recipient session: edit one person, add a new one
+    await page.evaluate(t => __APP__.loadCSV(t), scopedCsv);
+    const edit = await page.evaluate(() => {
+      const p = __APP__.people[0]; p.readiness = 'Interim Ready';
+      __APP__.people.push({ id: 'P-RETURN', name: 'Returned Person', title: 'New Analyst', department: 'Product', email: '', location: '', jobLevel: '', performance: '', potential: '', retentionRisk: '', mobility: '', criticalExperience: '', skills: '', readiness: 'Ready Now', source: 'Internal', candidateType: 'Successor', confidence: 'High', notes: '' });
+      return { pid: p.id, csv: __APP__.toCSV() };
+    });
+    await loadBase(page); // back in the master database
+    await page.evaluate(([n, t]) => __APP__.importFullDbText(n, t), ['returned_board.csv', edit.csv]);
+    const st = await page.evaluate(() => __APP__.importReview.stats);
+    assertEq(st.errors, 0, 'clean merge');
+    assertEq(st.peopleAdded, 1, 'unique new person detected');
+    await page.click('#drawerSave');
+    const after = await page.evaluate(pid => ({
+      readiness: __APP__.people.find(p => p.id === pid).readiness,
+      returned: !!__APP__.people.find(p => p.id === 'P-RETURN'),
+      roles: __APP__.roles.length, people: __APP__.people.length,
+    }), edit.pid);
+    assertEq(after.readiness, 'Interim Ready', 'edited value merged onto the master');
+    assert(after.returned, 'new person added');
+    assertEq(after.roles, 72, 'untouched master roles intact');
+    assertEq(after.people, 151, 'exactly one person added');
+  });
+  await test('rule changes in a returned full export merge back too', async () => {
+    await loadBase(page);
+    const returned = await page.evaluate(() => { const r = __APP__.rules.find(x => x.id === 'RULE-001'); r.enabled = false; const t = __APP__.toCSV(); r.enabled = true; return t; });
+    await page.evaluate(([n, t]) => __APP__.importFullDbText(n, t), ['returned_full.csv', returned]);
+    const st = await page.evaluate(() => __APP__.importReview.stats);
+    assert(st.other >= 1, 'rule update counted under Other updates');
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.rules.find(r => r.id === 'RULE-001').enabled), false, 'rule state merged');
+  });
+
+  /* ===================================================================
+     17. SCREENSHOTS for the report
      =================================================================== */
   section('13. Screenshots');
   await test('capture UI screenshots', async () => {

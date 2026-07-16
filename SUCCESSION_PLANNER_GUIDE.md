@@ -57,6 +57,9 @@ succession board:
   shift down), onto the open board to join last in line, or straight onto the
   throne. Staged pieces show a green **New** badge and can be removed before
   saving.
+- **Jump between boards** without leaving the chess view: the bar at the bottom
+  has a role dropdown (grouped by board, with candidate counts and VACANT
+  flags) plus Prev / Next arrows. Unsaved moves ask before being discarded.
 - **Nothing happens until you press Save.** Rules still apply — a blocked
   candidate shows a red callout and Save refuses. Close discards after asking.
 - **Fields shown** picks which details appear under every piece at once (one
@@ -111,6 +114,18 @@ CSV and become available everywhere, including rule builders and filters.
   rows that were skipped (e.g. a candidate whose name isn't in People). Nothing
   touches the database until you press **Apply Import**, and it merges into your
   current file — rules, tabs and everything else stay put.
+- **Real Excel files work too.** ⋯ → *Export Excel workbook (.xlsx)* writes a
+  workbook with People / Roles / Candidates / Boards tabs (plus a view-only
+  Rules tab) — nice for reading and for HR to edit. Bring it back with
+  ⋯ → *Import & merge* or just drag the .xlsx onto the app; the same review +
+  error report applies. No extra software is bundled — the app reads and writes
+  xlsx itself.
+- **Share one board.** ⋯ → *Share / export a board* exports a single board
+  (its roles, the people on those slates, nothing else) as a planner CSV — the
+  other person opens it in their own copy and sees only that board — or as an
+  Excel workbook. When they send it back, *Import & merge* calculates what's
+  new or changed against your database and shows it in the review before
+  anything is applied. Deletions don't sync — remove records in the master.
 - **Starting fresh?** ⋯ → *Download starter template* gives you a small example
   CSV with one row of each type to copy from.
 
