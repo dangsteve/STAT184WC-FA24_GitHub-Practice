@@ -561,31 +561,32 @@ function parseCsvRows(text) {
     await page.click('[data-action="deleteRule"]');
     assert(await page.evaluate(() => !__APP__.rules.some(r => r.id === 'RULE-BLOCK-T2')), 'rule deleted');
   });
-  await test('FIELD_RULE operators: equals / not equals / contains / not contains / list', async () => {
+  await test('eligibility operators: pass = allowed, fail = blocked (equals/not equals/contains/not contains/list/AND)', async () => {
     const r = await page.evaluate(() => {
       const mk = (op, field, value) => ({ id: 'X', name: 'x', type: 'FIELD_RULE', scope: 'Candidate', field, operator: op, value: JSON.stringify([{ field, operator: op, value }]), severity: 'Block', message: 'x', enabled: true });
       const results = [];
       const probe = { personId: '__nobody__', roleId: '__norole__', readiness: 'Ready Now', source: 'Internal', candidateType: 'Successor', confidence: 'High' };
       const run = rule => { __APP__.rules.push(rule); const e = __APP__.evaluateRules(probe); __APP__.rules.pop(); return e.blocks.length > 0; };
-      results.push(run(mk('equals', 'readiness', 'Ready Now')) === true);
-      results.push(run(mk('equals', 'readiness', '3-5 Years')) === false);
-      results.push(run(mk('not equals', 'readiness', '3-5 Years')) === true);
-      results.push(run(mk('contains', 'candidateType', 'success')) === true);
-      results.push(run(mk('contains', 'candidateType', 'athlete')) === false);
-      results.push(run(mk('not contains', 'candidateType', 'athlete')) === true);
-      results.push(run(mk('list', 'source', 'Internal|External')) === true);
-      results.push(run(mk('list', 'source', 'External|Agency')) === false);
-      // multi-condition AND
+      // probe MEETS the requirement -> not blocked; FAILS it -> blocked
+      results.push(run(mk('equals', 'readiness', 'Ready Now')) === false);
+      results.push(run(mk('equals', 'readiness', '3-5 Years')) === true);
+      results.push(run(mk('not equals', 'readiness', '3-5 Years')) === false);
+      results.push(run(mk('contains', 'candidateType', 'success')) === false);
+      results.push(run(mk('contains', 'candidateType', 'athlete')) === true);
+      results.push(run(mk('not contains', 'candidateType', 'athlete')) === false);
+      results.push(run(mk('list', 'source', 'Internal|External')) === false);
+      results.push(run(mk('list', 'source', 'External|Agency')) === true);
+      // multi-requirement AND: readiness passes but source fails -> blocked
       const multi = { id: 'X2', name: 'x', type: 'FIELD_RULE', scope: 'Candidate', field: 'readiness', operator: 'equals', value: JSON.stringify([{ field: 'readiness', operator: 'equals', value: 'Ready Now' }, { field: 'source', operator: 'equals', value: 'External' }]), severity: 'Block', message: 'x', enabled: true };
-      results.push(run(multi) === false);
+      results.push(run(multi) === true);
       return results;
     });
     assert(r.every(Boolean), 'operator matrix: ' + JSON.stringify(r));
   });
-  await test('create FIELD_RULE with contains via drawer UI', async () => {
+  await test('create eligibility rule with contains via drawer UI (pass allowed, fail flagged)', async () => {
     await page.evaluate(() => __APP__.openRuleDrawer());
     await typeInto(page, 'ruleId', 'RULE-CONTAINS-T');
-    await typeInto(page, 'ruleName', 'No interim in slate');
+    await typeInto(page, 'ruleName', 'Interim candidates only');
     await setSelect(page, 'ruleSeverity', 'Needs Review');
     await page.evaluate(() => {
       const row = document.querySelector('#conditionRows .condition-row');
@@ -600,8 +601,12 @@ function parseCsvRows(text) {
     assert(rule && rule.enabled, 'saved');
     const conds = JSON.parse(rule.value);
     assertEq(conds[0].operator, 'contains'); assertEq(conds[0].value, 'Interim');
-    const fires = await page.evaluate(() => __APP__.evaluateRules({ personId: 'x', roleId: 'y', candidateType: 'Interim Candidate', readiness: 'Ready Now', source: 'Internal', confidence: 'High' }).reviews.some(m => m.includes('No interim')));
-    assert(fires, 'review fires');
+    const res = await page.evaluate(() => {
+      const probe = extra => __APP__.evaluateRules({ personId: 'x', roleId: 'y', readiness: 'Ready Now', source: 'Internal', confidence: 'High', ...extra }).reviews.some(m => m.includes('Interim candidates only'));
+      return { failing: probe({ candidateType: 'Successor' }), passing: probe({ candidateType: 'Interim Candidate' }) };
+    });
+    assert(res.failing, 'candidate who fails the requirement is flagged');
+    assert(!res.passing, 'candidate who meets the requirement moves freely');
   });
   await test('legacy BLOCK rule without operator/target is inferred as "cannot change role"', async () => {
     await loadBase(page);

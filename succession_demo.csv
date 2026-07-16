@@ -20,4 +20,4 @@ SUCCESSOR,,,S03,,,,,,,,,,,,P07,,,,,,,,,,,,,Ready Now,External,Market Candidate,M
 SUCCESSOR,,,S04,,,,,,,,,,,,P06,,,,,,,,,,,,,1-2 Years,Internal,Successor,Medium,2,Same person on two slates — approval consumes the other.,R-CFO,false,false,,,,,,,,,,,,,,,,,,,
 SUCCESSOR,,,S05,,,,,,,,,,,,P08,,,,,,,,,,,,,Ready Now,Internal,Emergency Successor,High,1,Approve Top fills the vacant seat.,R-CRO,false,false,,,,,,,,,,,,,,,,,,,
 SUCCESSOR,,,S06,,,,,,,,,,,,P04,,,,,,,,,,,,,Ready Now,Internal,Successor,High,1,Approving vacates the Sales Director role — a cascade.,R-VP-SALES,false,false,,,,,,,,,,,,,,,,,,,
-RULE,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,RULE-DEMO-1,Hold candidates who are not Ready Now,FIELD_RULE,Candidate,readiness,not equals,Ready Now,,,,Block,This candidate is not Ready Now — review with the talent partner before moving them.,true,,,,,,
+RULE,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,RULE-DEMO-1,Only Ready Now candidates can move,FIELD_RULE,Candidate,readiness,equals,Ready Now,,,,Block,This candidate is not Ready Now — review with the talent partner before moving them.,true,,,,,,

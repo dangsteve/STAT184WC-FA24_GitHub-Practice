@@ -888,8 +888,10 @@ function evaluateRules(s){
       const personMatches=!rule.personId||rule.personId===s.personId;
       hit=op==='cannot change role'?(personMatches&&old&&old.id!==s.roleId):(personMatches&&rule.targetRoleId===s.roleId);
     }else if(rule.type==='FIELD_RULE'){
+      // eligibility rule: candidates who meet EVERY requirement may move;
+      // the rule fires on anyone who fails at least one
       const conds=ruleConditions(rule);
-      hit=conds.length&&conds.every(c=>compare(getFieldValue(p,s,c.field),c.operator,c.value));
+      hit=conds.length&&!conds.every(c=>compare(getFieldValue(p,s,c.field),c.operator,c.value));
     }
     if(hit){const msg=rule.message||`${rule.name||'Rule'} triggered`;(rule.severity==='Needs Review'?reviews:blocks).push(msg)}
   });
@@ -1197,13 +1199,13 @@ function ruleSummary(r){
     return `Backfill vacant roles from type: ${(cfg.autoTypes||[]).join(', ')||'?'}`;
   }
   const conds=ruleConditions(r);
-  return conds.map(c=>`${c.field} ${c.operator} ${String(c.value||'').split('|').join(', ')}`).join(' AND ')||'—';
+  return conds.length?'Eligible only if '+conds.map(c=>`${c.field} ${c.operator} ${String(c.value||'').split('|').join(', ')}`).join(' AND '):'—';
 }
 function renderRulesPage(){
-  setView('Rules','Rules run when candidates are approved or auto-moved. Priority: Block / Field rules stop moves → Auto Backfill fills vacancies → Auto Move queue.',`<button class="btn btn-green btn-sm" data-action="openRuleDrawerNew">+ New Rule</button>`);
+  setView('Rules','Rules run when candidates are approved or auto-moved. Eligibility rules let only candidates who meet every requirement move — everyone else is blocked or flagged. Priority: Block / Eligibility rules → Auto Backfill → Auto Move queue.',`<button class="btn btn-green btn-sm" data-action="openRuleDrawerNew">+ New Rule</button>`);
   const q=norm(v('search'));
   const list=rules.filter(r=>[r.id,r.name,r.type,r.severity,ruleSummary(r)].join(' ').toLowerCase().includes(q));
-  const typeBadge=t=>t==='BLOCK'?'<span class="badge red">Block move</span>':t==='AUTO_BACKFILL'?'<span class="badge blue">Auto backfill</span>':'<span class="badge amber">Candidate rule</span>';
+  const typeBadge=t=>t==='BLOCK'?'<span class="badge red">Block move</span>':t==='AUTO_BACKFILL'?'<span class="badge blue">Auto backfill</span>':'<span class="badge amber">Eligibility</span>';
   const rows=list.map(r=>`<tr>
       <td><input type="checkbox" class="switch" data-change="ruleToggle" data-rule-id="${attr(r.id)}" ${r.enabled?'checked':''} title="Enable / disable"></td>
       <td><b>${esc(r.name||r.id)}</b><div style="color:var(--muted);font-size:11px">${esc(r.id)}</div></td>
@@ -1617,7 +1619,7 @@ function openRuleDrawer(id=''){
   const html=`<div class="grid">
     <div><label>Rule ID</label><input id="ruleId" value="${attr(r.id)}"></div>
     <div><label>Rule Name</label><input id="ruleName" value="${attr(r.name)}" placeholder="Optional — auto-filled if blank"></div>
-    <div><label>Rule Type</label><select id="ruleType"><option value="FIELD_RULE" ${type==='FIELD_RULE'?'selected':''}>Candidate field rule</option><option value="BLOCK" ${type==='BLOCK'?'selected':''}>Block a person&rsquo;s move</option><option value="AUTO_BACKFILL" ${type==='AUTO_BACKFILL'?'selected':''}>Auto backfill vacancies</option></select></div>
+    <div><label>Rule Type</label><select id="ruleType"><option value="FIELD_RULE" ${type==='FIELD_RULE'?'selected':''}>Candidate eligibility rule</option><option value="BLOCK" ${type==='BLOCK'?'selected':''}>Block a person&rsquo;s move</option><option value="AUTO_BACKFILL" ${type==='AUTO_BACKFILL'?'selected':''}>Auto backfill vacancies</option></select></div>
     <div><label>Severity</label><select id="ruleSeverity"><option ${r.severity==='Block'?'selected':''}>Block</option><option ${r.severity==='Needs Review'?'selected':''}>Needs Review</option></select></div>
     <div><label>Enabled</label><select id="ruleEnabled"><option ${r.enabled?'selected':''}>true</option><option ${!r.enabled?'selected':''}>false</option></select></div>
     <div class="full"><label>Callout Message</label><textarea id="ruleMsg" placeholder="Shown when the rule fires">${esc(r.message)}</textarea></div>
@@ -1627,15 +1629,15 @@ function openRuleDrawer(id=''){
     <div><label>Operator</label><select id="ruleBlockOperator"><option value="cannot move to target role" ${r.operator!=='cannot change role'?'selected':''}>cannot move to target role</option><option value="cannot change role" ${r.operator==='cannot change role'?'selected':''}>cannot change role</option></select></div>
     <div id="targetRoleBox"><label>Target Role</label><select id="ruleTarget">${targetRoleOptions(r.targetRoleId)}</select></div>
   </div></div>
-  <div id="fieldSection" class="rule-section"><h3>Candidate Conditions</h3><div class="hint" style="margin-bottom:8px">All conditions must match for the rule to fire. Equal / not equal use a dropdown, contains matches partial text, list uses Excel-style checkboxes. Added values are saved in the CSV for reuse.</div>
+  <div id="fieldSection" class="rule-section"><h3>Eligibility Requirements</h3><div class="hint" style="margin-bottom:8px">A candidate must meet <b>all</b> of these to be approved or auto-moved — anyone who doesn&rsquo;t is stopped (severity Block) or flagged (Needs Review). Equal / not equal use a dropdown, contains matches partial text, list means any of the checked values. Added values are saved in the CSV for reuse.</div>
     <div id="conditionRows">${conds.map(c=>conditionRowHtml(c)).join('')}</div>
-    <button type="button" class="btn btn-green btn-sm" data-action="addConditionRow">+ Add Condition</button>
+    <button type="button" class="btn btn-green btn-sm" data-action="addConditionRow">+ Add Requirement</button>
   </div>
   <div id="autoSection" class="rule-section"><h3>Auto Backfill Rule</h3><div class="hint" style="margin-bottom:8px">When a role becomes vacant, the top-ranked slate candidate of this type is auto-moved in. Choose Custom for explicit role-to-person mappings.</div>
     <div style="max-width:320px"><label>Auto Fill From Candidate Type</label><select id="autoTypeSelect">${autoTypeOptions.map(t=>`<option ${t===autoSel?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
     <div id="customAutoBox" style="margin-top:10px"><h3>Custom Auto Fill Chart</h3><div id="customMapRows">${customMappings.map(m=>customMapRowHtml(m)).join('')}</div><button type="button" class="btn btn-green btn-sm" data-action="addCustomMapRow">+ Add Custom Row</button></div>
   </div>`;
-  openDrawer(id?(r.name||'Rule'):'Add Rule','Rules run on Approve and Auto Move. Priority: Block / Field rules → Auto Backfill → Auto Move queue.',html,()=>saveRule(id),
+  openDrawer(id?(r.name||'Rule'):'Add Rule','Rules run on Approve and Auto Move. Priority: Block / Eligibility rules → Auto Backfill → Auto Move queue.',html,()=>saveRule(id),
     id?`<button class="btn btn-danger" data-action="deleteRule" data-rule-id="${attr(id)}">Delete Rule</button>`:'');
   updateRuleTypeUI();
 }
@@ -1644,8 +1646,8 @@ function saveRule(oldId=''){
   const r={id:v('ruleId').trim()||uid('RULE'),name:v('ruleName'),type,scope:'Candidate',field:'',operator:'',value:'',personId:v('rulePerson'),targetRoleId:v('ruleTarget'),altPersonId:'',severity:v('ruleSeverity')||'Block',message:v('ruleMsg'),enabled:v('ruleEnabled')==='true'};
   if(r.id!==oldId&&rules.some(x=>x.id===r.id)){notice('ERR',`Rule ID "${r.id}" already exists.`);return}
   const missing=[];
-  if(!r.name)r.name=type==='FIELD_RULE'?'Candidate Field Rule':type==='BLOCK'?'Person Movement Block Rule':'Auto Backfill Rule';
-  if(!r.message)r.message=`${r.name} triggered.`;
+  if(!r.name)r.name=type==='FIELD_RULE'?'Candidate Eligibility Rule':type==='BLOCK'?'Person Movement Block Rule':'Auto Backfill Rule';
+  if(!r.message)r.message=type==='FIELD_RULE'?`Candidate does not meet the eligibility requirements (${r.name}).`:`${r.name} triggered.`;
   if(type==='BLOCK'){
     r.severity='Block';
     r.operator=v('ruleBlockOperator')||'cannot move to target role';
@@ -1655,7 +1657,7 @@ function saveRule(oldId=''){
   }
   if(type==='FIELD_RULE'){
     const conds=[...document.querySelectorAll('#conditionRows .condition-row')].map(row=>({field:row.querySelector('.condField')?.value||'',operator:row.querySelector('.condOperator')?.value||'',value:getConditionValues(row)})).filter(c=>c.field&&c.operator&&c.value);
-    if(!conds.length)missing.push('At least one condition with a value');
+    if(!conds.length)missing.push('At least one requirement with a value');
     r.field=conds[0]?.field||'';r.operator=conds[0]?.operator||'';r.value=JSON.stringify(conds);
     r.personId='';r.targetRoleId='';
   }

@@ -68,9 +68,11 @@ runs), and **✕ Remove**. **Approve Top** approves the #1 candidate.
 
 Three kinds, editable in plain language:
 
-- **Candidate field rule** — e.g. *readiness not equal to Ready Now → Block*.
-  Conditions support equal / not equal / contains / does not contain / any-of
-  (checkbox list), and you can stack several conditions (all must match).
+- **Candidate eligibility rule** — spells out who *is allowed* to move, e.g.
+  *readiness equal to Ready Now*: candidates who meet every requirement move
+  freely; anyone who doesn't is blocked (or flagged, depending on severity).
+  Requirements support equal / not equal / contains / does not contain /
+  any-of (checkbox list), and you can stack several (all must be met).
 - **Block a person's move** — a specific person cannot move to a specific role,
   or cannot change role at all.
 - **Auto backfill** — when a role becomes vacant, pull in the top-ranked slate
