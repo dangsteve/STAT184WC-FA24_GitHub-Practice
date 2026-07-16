@@ -15,9 +15,15 @@ One HTML file, one CSV. No install, no server, no accounts.
    the same CSV file. **Export** downloads a copy instead.
 
 The header shows the loaded file and an **Unsaved changes** dot whenever there is
-work that hasn't been written to the CSV yet. The app also keeps a local auto-backup
-as you work — if the browser closes unexpectedly, you'll be offered a one-click
-restore next time it opens.
+work that hasn't been written to the CSV yet.
+
+**The app remembers where you left off.** Next time it opens, your last session
+is restored automatically from a browser-side backup (unsaved work included and
+flagged), and a banner offers to **reconnect your database file** — one click
+reloads its latest contents (including edits made directly in Excel) and turns
+Save back into a one-click overwrite of that file. Open a different CSV and the
+app switches to it. The browser backup is a crash safety net on that computer
+only — the CSV file is always the real database, so keep saving.
 
 ## The tabs
 
@@ -96,6 +102,15 @@ CSV and become available everywhere, including rule builders and filters.
   Tree places roles like a family tree by level within their department (an SVP
   sits above the VPs, and so on), shown dashed. One click on **Apply inferred
   lines** makes those reporting lines permanent.
+- **Prefer Excel tabs?** Keep a workbook with *People*, *Roles* and *Candidates*
+  tabs (⋯ → *Download simple sheet templates* gives you the three layouts —
+  friendly headers, names instead of IDs are fine). Save each tab as CSV and
+  drag them all onto the app together (or ⋯ → *Import sheets (merge)*). You get
+  an **Import Review** first — how many rows are new vs. updated, every problem
+  listed with what was done about it, and a **downloadable error report** for
+  rows that were skipped (e.g. a candidate whose name isn't in People). Nothing
+  touches the database until you press **Apply Import**, and it merges into your
+  current file — rules, tabs and everything else stay put.
 - **Starting fresh?** ⋯ → *Download starter template* gives you a small example
   CSV with one row of each type to copy from.
 

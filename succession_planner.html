@@ -334,7 +334,9 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
         <button class="btn btn-quiet" data-action="toggleMenu" title="More actions">&#8943;</button>
         <div class="menu" id="moreMenu">
           <button data-action="manageTabs">Manage tabs&hellip;</button>
+          <button data-action="importSheets">Import sheets (merge)&hellip;</button>
           <button data-action="downloadTemplate">Download starter template</button>
+          <button data-action="downloadSheetTemplates">Download simple sheet templates</button>
           <div class="sep"></div>
           <button data-action="resetOrg">Reset org changes to import</button>
           <button class="danger" data-action="clearAll">Clear all data&hellip;</button>
@@ -427,6 +429,7 @@ let boards=systemBoards(),roles=[],people=[],successors=[],rules=[],history=[],m
 let fileHandle=null,selectedPersonId='',backRoleId='',undoStack=[],importBaseline=null,currentDrawerPersonId='',customFieldValues={};
 let activeTab='MASTER',dirty=false,backupTimer=null,automationDepth=0;
 let chess=null,chessSessionFields=null,chessDefaultFields=null,lastInferred=null;
+let bannerState={backup:null,fileName:''},reconnectHandle=null,importReview=null;
 
 function systemBoards(){return SYSTEM_TABS.map(t=>({id:t.id,name:t.name}))}
 function uid(p){return p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)}
@@ -472,30 +475,69 @@ function spawnToast(type,msg){
   setTimeout(()=>{if(t.parentNode)t.remove()},4600);
 }
 
-/* ---------- dirty tracking & local backup ---------- */
+/* ---------- dirty tracking, local backup & remembered file ---------- */
+function writeBackup(clean){try{localStorage.setItem(BACKUP_KEY,JSON.stringify({ts:Date.now(),csv:toCSV(),clean:!!clean,fileName:fileHandle?.name||''}))}catch(e){}}
 function markDirty(){
   dirty=true;
   el('fileStatus').classList.add('dirty');
   setStatus('Unsaved changes');
   clearTimeout(backupTimer);
-  backupTimer=setTimeout(()=>{try{localStorage.setItem(BACKUP_KEY,JSON.stringify({ts:Date.now(),csv:toCSV()}))}catch(e){}},900);
+  backupTimer=setTimeout(()=>writeBackup(false),900);
 }
 function markClean(msg){
   dirty=false;
   el('fileStatus').classList.remove('dirty');
   if(msg)setStatus(msg);
+  clearTimeout(backupTimer);
+  backupTimer=setTimeout(()=>writeBackup(true),900);
 }
-function checkBackup(){
+/* tiny IndexedDB key-value store — used to remember the opened file handle across sessions */
+function idbOpen(){return new Promise((res,rej)=>{const r=indexedDB.open('succession_planner',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function idbSet(k,v){try{const db=await idbOpen();return await new Promise((res,rej)=>{const tx=db.transaction('kv','readwrite');tx.objectStore('kv').put(v,k);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(e){}}
+async function idbGet(k){try{const db=await idbOpen();return await new Promise(res=>{const tx=db.transaction('kv','readonly');const rq=tx.objectStore('kv').get(k);rq.onsuccess=()=>res(rq.result);rq.onerror=()=>res(undefined)})}catch(e){return undefined}}
+async function idbDel(k){try{const db=await idbOpen();return await new Promise(res=>{const tx=db.transaction('kv','readwrite');tx.objectStore('kv').delete(k);tx.oncomplete=res;tx.onerror=res})}catch(e){}}
+async function rememberFileHandle(h){if(h&&h.name)await idbSet('fileHandle',h)}
+function renderBanners(){
+  let html='';
+  if(bannerState.fileName)html+=`<div class="banner"><span>Your database file <b>${esc(bannerState.fileName)}</b> is remembered from last time. Reconnect to load its latest contents (including edits made in Excel) and turn Save back into one-click overwrite.</span><button class="btn btn-primary btn-sm" data-action="reconnectFile">Reconnect ${esc(bannerState.fileName)}</button><button class="btn btn-quiet btn-sm" data-action="forgetFile">Forget this file</button></div>`;
+  if(bannerState.backup)html+=`<div class="banner"><span>${bannerState.backup.clean?'Your last session was restored automatically from the browser backup.':'<b>Unsaved work</b> from your last session was restored from the browser backup — Save or Export to keep it.'}</span><button class="btn btn-quiet btn-sm" data-action="dismissBanner">OK</button></div>`;
+  el('banner').innerHTML=html;
+}
+async function checkBackup(){
   let b=null;try{b=JSON.parse(localStorage.getItem(BACKUP_KEY)||'null')}catch(e){}
-  if(!b||!b.csv)return;
-  el('banner').innerHTML=`<div class="banner"><span>A local backup from <b>${esc(fmtDate(new Date(b.ts).toISOString()))}</b> was found (auto-saved as you worked). You can restore it or keep it for later.</span><button class="btn btn-quiet btn-sm" data-action="restoreBackup">Restore backup</button><button class="btn btn-quiet btn-sm" data-action="dismissBanner">Dismiss</button></div>`;
+  if(b&&b.csv&&!roles.length&&!people.length){
+    if(loadCSV(b.csv)){
+      bannerState.backup=b;
+      el('dbStatus').textContent=b.fileName?b.fileName+' (from browser backup)':'Restored from browser backup';
+      if(b.clean)markClean('Last session restored');else markDirty();
+    }
+  }
+  try{
+    const h=await idbGet('fileHandle');
+    if(h&&h.name){reconnectHandle=h;bannerState.fileName=h.name}
+  }catch(e){}
+  renderBanners();
 }
-function restoreBackup(){
-  let b=null;try{b=JSON.parse(localStorage.getItem(BACKUP_KEY)||'null')}catch(e){}
-  if(!b||!b.csv){notice('WARN','No backup found.');return}
-  if(loadCSV(b.csv)){el('dbStatus').textContent='Restored from local backup';notice('OK','Backup restored. Use Save / Export to write it to a CSV file.');markDirty()}
-  el('banner').innerHTML='';
+async function reconnectStoredFile(){
+  const h=reconnectHandle;
+  if(!h){notice('WARN','No remembered file.');return}
+  try{
+    if(h.queryPermission&&(await h.queryPermission({mode:'readwrite'}))!=='granted'){
+      if(!h.requestPermission||(await h.requestPermission({mode:'readwrite'}))!=='granted'){notice('ERR','Permission to the file was not granted — use Open CSV instead.');return}
+    }
+    if(dirty&&!confirm('Loading the file will replace the unsaved changes currently on screen. Continue?'))return;
+    const f=await h.getFile();
+    if(loadCSV(await f.text())){
+      fileHandle=h;
+      el('dbStatus').textContent=f.name;
+      bannerState.fileName='';bannerState.backup=null;
+      renderBanners();
+      notice('OK','Reconnected to '+f.name+' — Save now writes straight back to it.');
+      rememberFileHandle(h);
+    }
+  }catch(e){console.warn(e);notice('ERR','Could not reopen the remembered file — open it manually with Open CSV.')}
 }
+function forgetStoredFile(){reconnectHandle=null;bannerState.fileName='';idbDel('fileHandle');renderBanners();setStatus('Forgot the remembered file')}
 
 /* ---------- undo & baseline ---------- */
 function takeSnapshot(){return{roles:deepClone(roles),people:deepClone(people),successors:deepClone(successors),rules:deepClone(rules),history:deepClone(history),boards:deepClone(boards),customFieldValues:deepClone(customFieldValues),activeTab}}
@@ -614,6 +656,7 @@ function openDrawer(title,sub,body,save,left='',showBack=false){
   el('drawerSub').textContent=sub;
   el('drawerBody').innerHTML=body;
   el('drawerSave').style.display='inline-flex';
+  el('drawerSave').textContent='Save';
   el('drawerSave').onclick=save;
   el('drawerLeft').innerHTML=left;
   el('backBtn').style.display=showBack?'inline-flex':'none';
@@ -721,7 +764,11 @@ async function openCSV(){
     try{
       [fileHandle]=await window.showOpenFilePicker({types:[{description:'CSV',accept:{'text/csv':['.csv']}}],multiple:false});
       const f=await fileHandle.getFile();
-      if(loadCSV(await f.text()))el('dbStatus').textContent=f.name;
+      if(loadCSV(await f.text())){
+        el('dbStatus').textContent=f.name;
+        bannerState.fileName='';bannerState.backup=null;renderBanners();
+        rememberFileHandle(fileHandle);
+      }
       return;
     }catch(e){if(e&&e.name!=='AbortError')console.warn(e);setStatus('Open cancelled');return}
   }
@@ -738,6 +785,7 @@ async function saveCSV(){
       const w=await fileHandle.createWritable();await w.write(csv);await w.close();
       markClean('Saved '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
       notice('OK','Saved back to the opened CSV file.');
+      rememberFileHandle(fileHandle);
       return;
     }catch(e){console.warn(e)}
   }
@@ -1964,8 +2012,9 @@ const ACTIONS={
   manageTabs:()=>{el('moreMenu').classList.remove('open');openBoardDrawer()},
   resetOrg:()=>{el('moreMenu').classList.remove('open');resetOrgChanges()},
   clearAll:()=>{el('moreMenu').classList.remove('open');clearAll()},
-  restoreBackup:()=>restoreBackup(),
-  dismissBanner:()=>{el('banner').innerHTML=''},
+  dismissBanner:()=>{bannerState.backup=null;renderBanners()},
+  reconnectFile:()=>reconnectStoredFile(),
+  forgetFile:()=>forgetStoredFile(),
   openRole:d=>openRoleDrawer(d.roleId),
   openRoleDrawerNew:()=>openRoleDrawer(),
   openPerson:d=>openPersonDrawer(d.personId),
@@ -2066,9 +2115,26 @@ document.addEventListener('drop',async e=>{
   e.preventDefault();
   document.querySelectorAll('.dragover').forEach(x=>x.classList.remove('dragover'));
   if(e.dataTransfer.files&&e.dataTransfer.files.length){
-    const f=e.dataTransfer.files[0];
-    if(/\.csv$/i.test(f.name)){if(loadCSV(await f.text())){fileHandle=null;el('dbStatus').textContent=f.name+' (dropped — use Export to save changes)'}}
-    else notice('WARN','Only .csv files can be dropped here.');
+    // grab file-system handles synchronously — DataTransfer items are gone after the first await
+    const handlePromise=[...(e.dataTransfer.items||[])].map(it=>it.getAsFileSystemHandle?it.getAsFileSystemHandle().catch(()=>null):Promise.resolve(null));
+    const csvFiles=[...e.dataTransfer.files].filter(f=>/\.csv$/i.test(f.name));
+    if(!csvFiles.length){notice('WARN','Only .csv files can be dropped here.');return}
+    const texts=await Promise.all(csvFiles.map(async f=>({name:f.name,text:await f.text()})));
+    const isFullDb=t=>parseCSV(t.text)[0]?.map(h=>h.trim()).includes('recordType');
+    const fulls=texts.filter(isFullDb);
+    if(texts.length===1&&fulls.length===1){
+      if(dirty&&!confirm('Opening this file will replace the unsaved changes on screen. Continue?'))return;
+      if(loadCSV(texts[0].text)){
+        el('dbStatus').textContent=texts[0].name;
+        fileHandle=null;
+        try{const h=await handlePromise[0];if(h&&h.kind==='file'){fileHandle=h;rememberFileHandle(h)}}catch(err){}
+        if(!fileHandle)el('dbStatus').textContent=texts[0].name+' (dropped — use Save/Export to write changes)';
+        bannerState.fileName='';bannerState.backup=null;renderBanners();
+      }
+      return;
+    }
+    if(fulls.length){notice('ERR','Drop the full database file on its own — or drop simple people / roles / candidate sheets together to merge them in.');return}
+    startSheetImport(texts);
     return;
   }
   const t=e.target.closest('[data-drop]');
@@ -2143,8 +2209,226 @@ window.__APP__={
 
 /* ---------- boot ---------- */
 render();
-checkBackup();
-setStatus('Ready — open your CSV database or add records.');
+checkBackup().then(()=>{if(!roles.length&&!people.length)setStatus('Ready — open your CSV database or add records.')});
+</script>
+<script>
+'use strict';
+/* =====================================================================
+   Sheet import (merge) — lets HR keep an Excel workbook with People /
+   Roles / Candidates tabs, export each tab as CSV, and merge them into
+   the master database with a review step and downloadable error report.
+   ===================================================================== */
+let lastImportReport=null;
+
+function normalizeHeader(h){return String(h||'').toLowerCase().replace(/[_-]+/g,' ').replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim()}
+function detectSheetType(nh){
+  const has=x=>nh.includes(x);
+  if(has('recordtype')||has('record type'))return 'FULL';
+  if(has('role title')||has('roletitle'))return 'ROLES';
+  if(has('person name')||has('personname')||has('full name'))return 'PEOPLE';
+  const roleRef=['role','role id','roleid','successor role id','successorroleid'].some(has);
+  const personRef=['person','person id','personid','candidate'].some(has);
+  if(roleRef&&personRef)return 'SLATE';
+  if(has('name')&&(has('readiness')||has('candidate type')||has('email')))return 'PEOPLE';
+  if(has('title')&&has('level'))return 'ROLES';
+  return null;
+}
+const SHEET_ALIASES={
+  PEOPLE:{'person id':'personId','personid':'personId','id':'personId','employee id':'personId','name':'personName','person name':'personName','personname':'personName','full name':'personName','title':'personTitle','person title':'personTitle','persontitle':'personTitle','current title':'personTitle','department':'personDepartment','dept':'personDepartment','person department':'personDepartment','persondepartment':'personDepartment','email':'personEmail','personemail':'personEmail','email employee id':'personEmail','location':'location','job level':'jobLevel','joblevel':'jobLevel','performance':'performance','potential':'potential','retention risk':'retentionRisk','retentionrisk':'retentionRisk','mobility':'mobility','critical experience':'criticalExperience','criticalexperience':'criticalExperience','skills':'skills','readiness':'readiness','source':'source','candidate type':'candidateType','candidatetype':'candidateType','type':'candidateType','confidence':'confidence','notes':'notes'},
+  ROLES:{'role id':'roleId','roleid':'roleId','id':'roleId','role title':'roleTitle','roletitle':'roleTitle','title':'roleTitle','role':'roleTitle','level':'level','department':'department','dept':'department','manager role':'managerRoleId','manager role id':'managerRoleId','managerroleid':'managerRoleId','manager':'managerRoleId','reports to':'managerRoleId','incumbent':'incumbentRef','incumbent person id':'incumbentRef','incumbentpersonid':'incumbentRef','current person':'incumbentRef','incumbent name':'incumbentRef','incumbentname':'incumbentRef','board':'boardRef','board id':'boardRef','boardid':'boardRef','tab':'boardRef','risk':'risk','criticality':'criticality','owner':'owner','status':'status','sort order':'sortOrder','sortorder':'sortOrder'},
+  SLATE:{'role':'roleRef','role id':'roleRef','roleid':'roleRef','role title':'roleRef','successor role id':'roleRef','successorroleid':'roleRef','person':'personRef','person id':'personRef','personid':'personRef','candidate':'personRef','ranking':'ranking','rank':'ranking','priority':'ranking','readiness':'readiness','source':'source','candidate type':'candidateType','candidatetype':'candidateType','type':'candidateType','confidence':'confidence','notes':'notes','approved':'approved','auto move queued':'autoMoveQueued','automovequeued':'autoMoveQueued'},
+};
+const PERSON_KEYMAP={personName:'name',personTitle:'title',personDepartment:'department',personEmail:'email',location:'location',jobLevel:'jobLevel',performance:'performance',potential:'potential',retentionRisk:'retentionRisk',mobility:'mobility',criticalExperience:'criticalExperience',skills:'skills',readiness:'readiness',source:'source',candidateType:'candidateType',confidence:'confidence',notes:'notes'};
+function slugIdIn(list,prefix,label){
+  const base=prefix+'-'+(String(label).toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-|-$/g,'')||'X');
+  let id=base,i=2;
+  while(true){const ex=list.find(e=>e.id===id);if(!ex)return id;if(norm(ex.name||ex.title)===norm(label))return id;id=base+'-'+(i++)}
+}
+function buildSheetImport(fileTexts){
+  const staged={people:deepClone(people),roles:deepClone(roles),successors:deepClone(successors),boards:deepClone(boards)};
+  const report=[];
+  const stats={peopleAdded:0,peopleUpdated:0,rolesAdded:0,rolesUpdated:0,slateAdded:0,slateUpdated:0,errors:0,warnings:0};
+  const add=(file,row,sheet,id,field,severity,problem,action)=>{report.push({file,row,sheet,id:id||'',field:field||'',severity,problem,action:action||''});if(severity==='ERROR')stats.errors++;else stats.warnings++};
+  const findPerson=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=staged.people.find(p=>p.id===ref);if(hit)return hit;const byName=staged.people.filter(p=>norm(p.name)===norm(ref));return byName.length===1?byName[0]:(byName.length?'AMBIG':null)};
+  const findRole=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=staged.roles.find(r=>r.id===ref);if(hit)return hit;const byTitle=staged.roles.filter(r=>norm(r.title)===norm(ref));return byTitle.length===1?byTitle[0]:(byTitle.length?'AMBIG':null)};
+  const knownReadiness=new Set([...valuesForField('readiness',['Ready Now','1-2 Years','3-5 Years'])].map(norm));
+
+  const parsed=[];
+  for(const ft of fileTexts){
+    const rows=parseCSV(ft.text);
+    if(rows.length<2){add(ft.name,1,'?','','','ERROR','File is empty or has no data rows','File skipped');continue}
+    const rawHeaders=rows[0].map(h=>String(h||'').trim());
+    const nh=rawHeaders.map(normalizeHeader);
+    const type=detectSheetType(nh);
+    if(!type){add(ft.name,1,'?','','','ERROR','Could not tell if this is a People, Roles or Candidates sheet — start from the simple sheet templates','File skipped');continue}
+    if(type==='FULL'){add(ft.name,1,'FULL','','','ERROR','This is a full database file — open it with Open CSV instead of merging it','File skipped');continue}
+    parsed.push({ft,type,rawHeaders,nh,rows:rows.slice(1)});
+  }
+  const orderOf={PEOPLE:0,ROLES:1,SLATE:2};
+  parsed.sort((a,b)=>orderOf[a.type]-orderOf[b.type]);
+
+  for(const sheet of parsed){
+    const aliases=SHEET_ALIASES[sheet.type];
+    const label=sheet.type==='PEOPLE'?'People':sheet.type==='ROLES'?'Roles':'Candidates';
+    sheet.rows.forEach((cells,idx)=>{
+      const rowNum=idx+2;
+      if(!cells.some(c=>String(c||'').trim()))return;
+      const o={},x={};
+      sheet.rawHeaders.forEach((raw,i)=>{
+        if(!raw)return;
+        const canon=aliases[sheet.nh[i]];
+        const val=cells[i]||'';
+        if(canon)o[canon]=val;else if(String(val).trim())x[raw]=val;
+      });
+      if(sheet.type==='PEOPLE'){
+        const name=String(o.personName||'').trim();let id=String(o.personId||'').trim();
+        if(!id&&!name){add(sheet.ft.name,rowNum,label,'','','ERROR','Row has neither a Person ID nor a Name','Row skipped');return}
+        if(!id){id=slugIdIn(staged.people,'P',name);add(sheet.ft.name,rowNum,label,id,'personId','WARNING',`No Person ID given for "${name}"`,'Generated '+id)}
+        let p=staged.people.find(e=>e.id===id);
+        if(!p){
+          if(!name){add(sheet.ft.name,rowNum,label,id,'personName','ERROR','New person has no Name','Row skipped');return}
+          p={id,name,title:'',department:'',email:'',location:'',jobLevel:'',performance:'',potential:'',retentionRisk:'',mobility:'',criticalExperience:'',skills:'',readiness:'1-2 Years',source:'Internal',candidateType:'Successor',confidence:'Medium',notes:''};
+          staged.people.push(p);stats.peopleAdded++;
+        }else stats.peopleUpdated++;
+        Object.entries(PERSON_KEYMAP).forEach(([canon,ek])=>{if(String(o[canon]??'').trim()!=='')p[ek]=o[canon]});
+        if(Object.keys(x).length)p._x={...(p._x||{}),...x};
+        if(String(o.readiness||'').trim()&&!knownReadiness.has(norm(o.readiness)))add(sheet.ft.name,rowNum,label,id,'readiness','WARNING',`New readiness value "${o.readiness}"`,'Imported as-is');
+      }
+      if(sheet.type==='ROLES'){
+        const title=String(o.roleTitle||'').trim();let id=String(o.roleId||'').trim();
+        if(!id&&!title){add(sheet.ft.name,rowNum,label,'','','ERROR','Row has neither a Role ID nor a Role Title','Row skipped');return}
+        if(!id){id=slugIdIn(staged.roles,'R',title);add(sheet.ft.name,rowNum,label,id,'roleId','WARNING',`No Role ID given for "${title}"`,'Generated '+id)}
+        let r=staged.roles.find(e=>e.id===id);
+        if(!r){
+          if(!title){add(sheet.ft.name,rowNum,label,id,'roleTitle','ERROR','New role has no Role Title','Row skipped');return}
+          r={id,title,level:'VP',department:'',boardId:'',managerRoleId:'',incumbentPersonId:'',incumbentName:'VACANT',risk:'Medium',criticality:'Medium',owner:'',status:'Active Plan',sortOrder:staged.roles.length+1};
+          staged.roles.push(r);stats.rolesAdded++;
+        }else stats.rolesUpdated++;
+        [['roleTitle','title'],['level','level'],['department','department'],['risk','risk'],['criticality','criticality'],['owner','owner'],['status','status']].forEach(([canon,ek])=>{if(String(o[canon]??'').trim()!=='')r[ek]=o[canon]});
+        if(String(o.sortOrder??'').trim()!=='')r.sortOrder=Number(o.sortOrder)||r.sortOrder;
+        if(String(o.managerRoleId??'').trim()!==''){
+          const m=findRole(o.managerRoleId);
+          if(m==='AMBIG')add(sheet.ft.name,rowNum,label,id,'managerRoleId','WARNING',`"${o.managerRoleId}" matches several roles`,'Manager left unchanged');
+          else if(m){if(m.id!==String(o.managerRoleId).trim())add(sheet.ft.name,rowNum,label,id,'managerRoleId','WARNING',`Manager matched by title: "${o.managerRoleId}"`,'Linked to '+m.id);r.managerRoleId=m.id}
+          else{r.managerRoleId=String(o.managerRoleId).trim();add(sheet.ft.name,rowNum,label,id,'managerRoleId','WARNING',`Manager role "${o.managerRoleId}" not found`,'Kept — the org tree will place this role by level until it exists')}
+        }
+        if(String(o.incumbentRef??'').trim()!==''){
+          const ref=String(o.incumbentRef).trim();
+          if(['vacant','none','tbd','open'].includes(norm(ref))){r.incumbentPersonId='';r.incumbentName='VACANT'}
+          else{
+            const ip=findPerson(ref);
+            if(ip==='AMBIG')add(sheet.ft.name,rowNum,label,id,'incumbent','WARNING',`"${ref}" matches several people`,'Incumbent left unchanged');
+            else if(ip){if(ip.id!==ref)add(sheet.ft.name,rowNum,label,id,'incumbent','WARNING',`Incumbent matched by name: "${ref}"`,'Linked to '+ip.id);r.incumbentPersonId=ip.id;r.incumbentName=ip.name}
+            else add(sheet.ft.name,rowNum,label,id,'incumbent','ERROR',`Incumbent "${ref}" not found in People`,'Incumbent left unchanged — import the People sheet first or fix the name');
+          }
+        }
+        if(String(o.boardRef??'').trim()!==''){
+          const ref=String(o.boardRef).trim();
+          let b=staged.boards.find(bb=>bb.id===ref)||staged.boards.find(bb=>norm(bb.name)===norm(ref));
+          if(!b){b={id:/^BOARD-/i.test(ref)?ref.toUpperCase():'BOARD-'+(ref.toUpperCase().replace(/[^A-Z0-9]+/g,'-')||'X'),name:/^BOARD-/i.test(ref)?prettyBoardName(ref):ref};staged.boards.push(b);add(sheet.ft.name,rowNum,label,id,'board','WARNING',`New board tab "${b.name}" was created`,'Check Manage Tabs if unwanted')}
+          r.boardId=b.id;
+        }
+      }
+      if(sheet.type==='SLATE'){
+        const rRef=findRole(o.roleRef),pRef=findPerson(o.personRef);
+        if(!String(o.roleRef||'').trim()||!String(o.personRef||'').trim()){add(sheet.ft.name,rowNum,label,'','','ERROR','Row needs both a Role and a Person','Row skipped');return}
+        if(rRef==='AMBIG'||!rRef){add(sheet.ft.name,rowNum,label,String(o.roleRef),'role','ERROR',rRef?`"${o.roleRef}" matches several roles`:`Role "${o.roleRef}" not found`,'Row skipped — fix the role name/ID or import the Roles sheet first');return}
+        if(pRef==='AMBIG'||!pRef){add(sheet.ft.name,rowNum,label,String(o.personRef),'person','ERROR',pRef?`"${o.personRef}" matches several people`:`Person "${o.personRef}" not found`,'Row skipped — fix the name/ID or import the People sheet first');return}
+        if(rRef.id!==String(o.roleRef).trim())add(sheet.ft.name,rowNum,label,rRef.id,'role','WARNING',`Role matched by title: "${o.roleRef}"`,'Linked to '+rRef.id);
+        if(pRef.id!==String(o.personRef).trim())add(sheet.ft.name,rowNum,label,pRef.id,'person','WARNING',`Person matched by name: "${o.personRef}"`,'Linked to '+pRef.id);
+        let s=staged.successors.find(e=>e.roleId===rRef.id&&e.personId===pRef.id);
+        if(!s){
+          const maxRank=Math.max(0,...staged.successors.filter(e=>e.roleId===rRef.id).map(e=>+e.ranking||0));
+          s={id:uid('S'),roleId:rRef.id,personId:pRef.id,readiness:pRef.readiness||'1-2 Years',source:pRef.source||'Internal',candidateType:pRef.candidateType||'Successor',confidence:pRef.confidence||'Medium',ranking:maxRank+1,notes:'',approved:false,autoMoveQueued:false};
+          staged.successors.push(s);stats.slateAdded++;
+        }else stats.slateUpdated++;
+        [['readiness','readiness'],['source','source'],['candidateType','candidateType'],['confidence','confidence'],['notes','notes']].forEach(([canon,ek])=>{if(String(o[canon]??'').trim()!=='')s[ek]=o[canon]});
+        if(String(o.ranking??'').trim()!=='')s.ranking=Number(o.ranking)||s.ranking;
+        if(String(o.approved??'').trim()!=='')s.approved=norm(o.approved)==='true';
+        if(String(o.autoMoveQueued??'').trim()!=='')s.autoMoveQueued=norm(o.autoMoveQueued)==='true';
+        if(Object.keys(x).length)s._x={...(s._x||{}),...x};
+      }
+    });
+  }
+  // renumber every touched slate 1..n
+  const byRole=new Map();
+  staged.successors.forEach(s=>{const a=byRole.get(s.roleId);if(a)a.push(s);else byRole.set(s.roleId,[s])});
+  byRole.forEach(a=>a.sort((m,n)=>(+m.ranking||999)-(+n.ranking||999)).forEach((s,i)=>s.ranking=i+1));
+  return{staged,report,stats,files:fileTexts.map(f=>f.name)};
+}
+function startSheetImport(fileTexts){
+  if(!fileTexts||!fileTexts.length)return;
+  openImportReview(buildSheetImport(fileTexts));
+}
+function openImportReview(review){
+  importReview=review;lastImportReport=review.report;
+  const s=review.stats;
+  const issueRows=review.report.slice(0,200).map(i=>`<tr><td>${i.severity==='ERROR'?'<span class="badge red">Error</span>':'<span class="badge amber">Warning</span>'}</td><td style="white-space:nowrap">${esc(i.file)} · row ${i.row}</td><td>${esc(i.sheet)}</td><td>${esc(i.id)}</td><td>${esc(i.problem)}</td><td>${esc(i.action)}</td></tr>`).join('');
+  openDrawer('Import Review','Sheets: '+review.files.join(', ')+' — nothing is saved until you press Apply Import.',
+    `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+      <div class="kpi"><b>${s.peopleAdded+s.peopleUpdated}</b><small>People</small><div class="sub">${s.peopleAdded} new · ${s.peopleUpdated} updated</div></div>
+      <div class="kpi"><b>${s.rolesAdded+s.rolesUpdated}</b><small>Roles</small><div class="sub">${s.rolesAdded} new · ${s.rolesUpdated} updated</div></div>
+      <div class="kpi"><b>${s.slateAdded+s.slateUpdated}</b><small>Slate rows</small><div class="sub">${s.slateAdded} new · ${s.slateUpdated} updated</div></div>
+      <div class="kpi"><b style="${s.errors?'color:var(--red)':''}">${s.errors}</b><small>Errors</small><div class="sub">rows skipped</div></div>
+      <div class="kpi"><b style="${s.warnings?'color:var(--amber)':''}">${s.warnings}</b><small>Warnings</small><div class="sub">imported, check them</div></div>
+    </div>`+
+    (review.report.length
+      ?`<div class="tablebox"><table class="table"><thead><tr><th></th><th>Where</th><th>Sheet</th><th>Record</th><th>Problem</th><th>What was done</th></tr></thead><tbody>${issueRows}</tbody></table>${review.report.length>200?`<div class="tfoot-note">Showing 200 of ${review.report.length} — the downloadable report has everything.</div>`:''}</div>`
+      :'<div class="notice ok">No issues found — every row lines up cleanly.</div>'),
+    ()=>applyImport(),
+    `<button class="btn btn-danger" data-action="importCancel">Cancel Import</button> ${review.report.length?'<button class="btn btn-quiet" data-action="downloadImportReport">Download error report</button>':''}`);
+  el('drawerSave').textContent='Apply Import';
+}
+function applyImport(){
+  if(!importReview)return;
+  pushUndo('Import sheets');
+  people=importReview.staged.people;roles=importReview.staged.roles;successors=importReview.staged.successors;boards=importReview.staged.boards;
+  const s=importReview.stats;
+  log('Sheets Imported',`${importReview.files.join(', ')} — people +${s.peopleAdded}/upd ${s.peopleUpdated}, roles +${s.rolesAdded}/upd ${s.rolesUpdated}, slate +${s.slateAdded}/upd ${s.slateUpdated}, ${s.errors} errors, ${s.warnings} warnings`);
+  notice(s.errors?'WARN':'OK',s.errors?`Import applied — ${s.errors} row(s) were skipped. Use ⋯ → the error report to fix and re-import them.`:'Import applied cleanly.');
+  importReview=null;
+  closeDrawer();render();
+}
+function buildImportReportCsv(report){
+  const rows=[['File','Row','Sheet','Record ID','Field','Severity','Problem','What Was Done'].join(',')];
+  (report||[]).forEach(i=>rows.push([i.file,i.row,i.sheet,i.id,i.field,i.severity,i.problem,i.action].map(csvEsc).join(',')));
+  return rows.join('\n');
+}
+function downloadImportReport(){
+  const rep=(importReview&&importReview.report)||lastImportReport;
+  if(!rep||!rep.length){notice('WARN','No import issues to report.');return}
+  download('import_error_report.csv',buildImportReportCsv(rep),'text/csv');
+}
+function pickSheetFiles(){
+  const input=document.createElement('input');
+  input.type='file';input.accept='.csv,text/csv';input.multiple=true;
+  input.onchange=async()=>{
+    const files=[...input.files].filter(f=>/\.csv$/i.test(f.name));
+    if(!files.length)return;
+    const texts=await Promise.all(files.map(async f=>({name:f.name,text:await f.text()})));
+    startSheetImport(texts);
+  };
+  input.click();
+}
+function downloadSheetTemplates(){
+  const t=[
+    ['people_sheet.csv','Person ID,Name,Title,Department,Email,Location,Job Level,Performance,Potential,Retention Risk,Mobility,Critical Experience,Skills,Readiness,Source,Candidate Type,Confidence,Notes\n,Jordan Example,Director of Ops,Operations,jordan@example.com,Austin,Director,High,High,Low,Yes,Scaling teams,Leadership; Planning,Ready Now,Internal,Successor,High,Person ID is optional — one is generated from the name'],
+    ['roles_sheet.csv','Role ID,Role Title,Level,Department,Manager Role,Incumbent,Board,Risk,Criticality,Owner,Status,Sort Order\n,VP of Operations,VP,Operations,,Jordan Example,Operations Board,Medium,High,HR Lead,Active Plan,1'],
+    ['slate_sheet.csv','Role,Person,Ranking,Readiness,Candidate Type,Source,Confidence,Notes\nVP of Operations,Jordan Example,1,Ready Now,Successor,Internal,High,Role and Person accept names or IDs'],
+  ];
+  t.forEach(([name,content],i)=>setTimeout(()=>download(name,content,'text/csv'),i*400));
+  notice('OK','Three simple sheet templates are downloading — fill them in (Excel tabs work great) and drag them back onto the app to merge.');
+}
+Object.assign(ACTIONS,{
+  importSheets:()=>{el('moreMenu').classList.remove('open');pickSheetFiles()},
+  downloadSheetTemplates:()=>{el('moreMenu').classList.remove('open');downloadSheetTemplates()},
+  importCancel:()=>{importReview=null;closeDrawer();notice('WARN','Import cancelled — nothing was changed.')},
+  downloadImportReport:()=>downloadImportReport(),
+});
+Object.assign(window.__APP__,{startSheetImport,buildSheetImport,applyImport,buildImportReportCsv,downloadImportReport,downloadSheetTemplates,detectSheetType,normalizeHeader,idbSet,idbGet,idbDel,reconnectStoredFile,forgetStoredFile,checkBackup,renderBanners,writeBackup});
+Object.defineProperty(window.__APP__,'importReview',{get:()=>importReview});
+Object.defineProperty(window.__APP__,'bannerState',{get:()=>bannerState});
+window.__APP__.setReconnectHandle=h=>{reconnectHandle=h;bannerState.fileName=h&&h.name||'';renderBanners()};
 </script>
 </body>
 </html>

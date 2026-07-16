@@ -948,16 +948,18 @@ function parseCsvRows(text) {
     await page.evaluate(() => __APP__.addSuccessor(__APP__.people[9].id, 'R-COO'));
     assertEq((await counts(page)).dirty, true, 'dirty after change');
   });
-  await test('local backup is written and restorable after reload', async () => {
+  await test('local backup auto-restores the whole session after reload (no clicks)', async () => {
     await page.waitForTimeout(1200); // backup debounce
     const hasBackup = await page.evaluate(() => !!localStorage.getItem('succession_planner_backup_v1'));
     assert(hasBackup, 'backup written');
     await page.reload();
-    await page.waitForSelector('[data-action="restoreBackup"]');
-    await page.click('[data-action="restoreBackup"]');
+    await page.waitForFunction(() => window.__APP__ && __APP__.roles.length > 0);
     const c = await counts(page);
-    assertEq(c.roles, 72, 'backup restored roles');
-    assert(c.people >= 150, 'backup restored people');
+    assertEq(c.roles, 72, 'roles auto-restored');
+    assert(c.people >= 150, 'people auto-restored');
+    assertEq(c.dirty, true, 'unsaved work still flagged as unsaved');
+    assert(await page.locator('.banner').count() >= 1, 'restore banner explains what happened');
+    await page.click('[data-action="dismissBanner"]');
   });
   await test('Escape closes drawer; drawer backdrop click closes', async () => {
     await page.evaluate(() => __APP__.openPersonDrawer('P001'));
@@ -1298,13 +1300,140 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     15. SCREENSHOTS for the report
+     15. FILE MEMORY & SHEET IMPORTS (Excel-tab workflow)
+     =================================================================== */
+  section('15. File memory & sheet imports');
+  await test('remembered file: reconnect banner reopens it and Save overwrites it', async () => {
+    const supported = await page.evaluate(async () => { try { if (!navigator.storage || !navigator.storage.getDirectory) return false; await navigator.storage.getDirectory(); return true; } catch (e) { return false; } });
+    if (!supported) { console.log('        OPFS unavailable in this browser — path skipped'); return; }
+    await page.evaluate(async csv => {
+      const root = await navigator.storage.getDirectory();
+      const fh = await root.getFileHandle('remembered.csv', { create: true });
+      const w = await fh.createWritable(); await w.write(csv); await w.close();
+      await __APP__.idbSet('fileHandle', fh);
+      localStorage.removeItem('succession_planner_backup_v1');
+    }, BASE_CSV);
+    await page.reload();
+    await page.waitForSelector('[data-action="reconnectFile"]');
+    await page.click('[data-action="reconnectFile"]');
+    await page.waitForFunction(() => __APP__.roles.length === 72);
+    const name = await page.evaluate(() => document.getElementById('dbStatus').textContent);
+    assert(name.includes('remembered.csv'), 'connected to the remembered file: ' + name);
+    await page.evaluate(() => __APP__.openPersonDrawer('P001'));
+    await typeInto(page, 'pName', 'Reconnected Name');
+    await page.click('#drawerSave');
+    await page.click('[data-action="saveCSV"]');
+    await page.waitForTimeout(400);
+    const content = await page.evaluate(async () => { const root = await navigator.storage.getDirectory(); const fh = await root.getFileHandle('remembered.csv'); return (await fh.getFile()).text(); });
+    assert(content.includes('Reconnected Name'), 'Save overwrote the connected file');
+    assertEq((await counts(page)).dirty, false, 'clean after save');
+    await page.evaluate(() => __APP__.forgetStoredFile());
+  });
+  await test('remembered-file banner survives reload; unusable handle fails gracefully', async () => {
+    const idbOk = await page.evaluate(async () => { try { await __APP__.idbSet('probe', { v: 1 }); const r = await __APP__.idbGet('probe'); await __APP__.idbDel('probe'); return r && r.v === 1; } catch (e) { return false; } });
+    assert(idbOk, 'IndexedDB key-value store works on this origin');
+    await page.evaluate(async () => { await __APP__.idbSet('fileHandle', { name: 'my_database.csv' }); localStorage.removeItem('succession_planner_backup_v1'); });
+    await page.reload();
+    await page.waitForSelector('[data-action="reconnectFile"]');
+    const banner = await page.evaluate(() => document.getElementById('banner').textContent);
+    assert(banner.includes('my_database.csv'), 'banner names the remembered file');
+    await page.click('[data-action="reconnectFile"]');
+    await page.waitForTimeout(200);
+    const msg = await lastMsg(page);
+    assert(msg.type === 'ERR' && msg.message.includes('Open CSV'), 'unusable handle explains what to do instead');
+    await page.evaluate(() => __APP__.forgetStoredFile());
+    assert((await page.evaluate(() => document.getElementById('banner').textContent)) === '', 'forget clears the banner');
+  });
+  await test('people sheet merges with aliases, auto-IDs and extra columns; Apply persists', async () => {
+    await loadBase(page);
+    const sheet = 'Person ID,Name,Title,Department,Readiness,Shirt Size\n' +
+      ',Pat New Hire,Ops Analyst,Operations,Ready Now,L\n' +
+      'P001,Mei Smith,Chief of Staff,,Ready Now,M';
+    await page.evaluate(t => __APP__.startSheetImport([{ name: 'people.csv', text: t }]), sheet);
+    const rv = await page.evaluate(() => ({ stats: __APP__.importReview.stats, report: __APP__.importReview.report }));
+    assertEq(rv.stats.peopleAdded, 1, 'one new person'); assertEq(rv.stats.peopleUpdated, 1, 'one update');
+    assert(rv.report.some(r => r.severity === 'WARNING' && r.action.startsWith('Generated P-PAT')), 'auto-ID warning listed');
+    assert(await page.evaluate(() => !__APP__.people.some(p => p.name === 'Pat New Hire')), 'nothing applied before Apply Import');
+    await page.click('#drawerSave'); // Apply Import
+    const after = await page.evaluate(() => ({ pat: __APP__.people.find(p => p.name === 'Pat New Hire'), mei: __APP__.people.find(p => p.id === 'P001') }));
+    assert(after.pat && after.pat.id.startsWith('P-PAT'), 'added with generated ID');
+    assertEq(after.pat._x['Shirt Size'], 'L', 'unknown column kept as an extra field');
+    assertEq(after.mei.title, 'Chief of Staff', 'existing person updated by ID');
+    assert(after.mei.department, 'blank cells do not wipe existing values');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'PERSON' && r.personName === 'Pat New Hire'), 'persisted to the CSV');
+  });
+  await test('slate sheet resolves role titles and person names; dangling refs are skipped with errors', async () => {
+    await loadBase(page);
+    const pick = await page.evaluate(() => {
+      const onSlate = new Set(__APP__.successors.filter(s => s.roleId === 'R-CEO').map(s => s.personId));
+      const cnt = {}; __APP__.people.forEach(p => cnt[p.name] = (cnt[p.name] || 0) + 1);
+      const inc = __APP__.roles.find(r => r.id === 'R-CEO').incumbentPersonId;
+      const p = __APP__.people.find(p => cnt[p.name] === 1 && !onSlate.has(p.id) && p.id !== inc);
+      return { name: p.name, id: p.id };
+    });
+    const sheet = 'Role,Person,Ranking,Readiness\n' +
+      `Chief Executive Officer,${pick.name},1,Ready Now\n` +
+      `Ghost Role,${pick.name},1,\n` +
+      'Chief Executive Officer,Nobody Realman,2,';
+    await page.evaluate(t => __APP__.startSheetImport([{ name: 'slate.csv', text: t }]), sheet);
+    const rv = await page.evaluate(() => ({ stats: __APP__.importReview.stats, csv: __APP__.buildImportReportCsv(__APP__.importReview.report) }));
+    assertEq(rv.stats.slateAdded, 1, 'one valid row staged');
+    assertEq(rv.stats.errors, 2, 'two dangling refs are errors');
+    assert(rv.csv.includes('Ghost Role') && rv.csv.includes('Nobody Realman') && rv.csv.includes('ERROR'), 'error report names the bad rows');
+    await page.click('#drawerSave');
+    const ok = await page.evaluate(pid => __APP__.successors.some(s => s.roleId === 'R-CEO' && s.personId === pid), pick.id);
+    assert(ok, 'resolved-by-name row applied; bad rows skipped');
+  });
+  await test('roles sheet: manager by title, incumbent by name, board tab auto-created', async () => {
+    await loadBase(page);
+    const pickName = await page.evaluate(() => { const cnt = {}; __APP__.people.forEach(p => cnt[p.name] = (cnt[p.name] || 0) + 1); return __APP__.people.find(p => cnt[p.name] === 1).name; });
+    const sheet = 'Role ID,Role Title,Level,Department,Manager Role,Incumbent,Board\n' +
+      `,Deputy CFO,VP,Finance,Chief Financial Officer,${pickName},Growth Board`;
+    await page.evaluate(t => __APP__.startSheetImport([{ name: 'roles.csv', text: t }]), sheet);
+    assertEq(await page.evaluate(() => __APP__.importReview.stats.rolesAdded), 1);
+    await page.click('#drawerSave');
+    const r = await page.evaluate(() => __APP__.roles.find(x => x.title === 'Deputy CFO'));
+    assertEq(r.managerRoleId, 'R-CFO', 'manager resolved by title');
+    assert(r.incumbentPersonId, 'incumbent resolved by name');
+    const b = await page.evaluate(() => __APP__.boards.find(x => x.name === 'Growth Board'));
+    assert(b, 'board tab created');
+    assertEq(r.boardId, b.id, 'role assigned to the new tab');
+  });
+  await test('cancelling an import leaves the database byte-identical', async () => {
+    await loadBase(page);
+    const before = await csvOf(page);
+    await page.evaluate(() => __APP__.startSheetImport([{ name: 'p.csv', text: 'Person ID,Name,Readiness\n,Cancel Me,Ready Now' }]));
+    await page.click('[data-action="importCancel"]');
+    assertEq(await csvOf(page), before, 'nothing changed');
+    assert(await page.evaluate(() => !__APP__.importReview), 'review cleared');
+  });
+  await test('dropping roles + slate sheets together works regardless of drop order', async () => {
+    await loadBase(page);
+    const pickName = await page.evaluate(() => { const cnt = {}; __APP__.people.forEach(p => cnt[p.name] = (cnt[p.name] || 0) + 1); return __APP__.people.find(p => cnt[p.name] === 1).name; });
+    await page.evaluate(([roleSheet, slateSheet]) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([slateSheet], 'slate.csv', { type: 'text/csv' })); // slate FIRST on purpose
+      dt.items.add(new File([roleSheet], 'roles.csv', { type: 'text/csv' }));
+      document.body.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    }, ['Role ID,Role Title,Level,Department\nR-ZIP,Zip Role,VP,Ops', `Role,Person,Ranking\nZip Role,${pickName},1`]);
+    await page.waitForFunction(() => !!__APP__.importReview);
+    const rv = await page.evaluate(() => __APP__.importReview.stats);
+    assertEq(rv.rolesAdded, 1, 'role staged');
+    assertEq(rv.slateAdded, 1, 'slate row resolved against the new role (roles processed first)');
+    assertEq(rv.errors, 0, 'no errors');
+    await page.click('[data-action="importCancel"]');
+  });
+
+  /* ===================================================================
+     16. SCREENSHOTS for the report
      =================================================================== */
   section('13. Screenshots');
   await test('capture UI screenshots', async () => {
     await page.setViewportSize({ width: 1560, height: 980 });
     await page.evaluate(() => localStorage.clear());
     await page.reload();
+    await page.evaluate(() => __APP__.forgetStoredFile());
     await loadBase(page);
     const tidy = () => page.evaluate(() => {
       document.getElementById('toasts').innerHTML = '';

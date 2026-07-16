@@ -1,6 +1,6 @@
 # Succession Planner — Stress Test Report
 
-**Result: 81 / 81 automated scenarios pass, zero console errors.**
+**Result: 88 / 88 automated scenarios pass, zero console errors.**
 
 The suite (`tests/stress_test.cjs`) drives the real app in headless Chromium via
 Playwright — it clicks the actual buttons, opens the actual drawers, and fires real
@@ -26,10 +26,11 @@ NODE_PATH=$(npm root -g) node tests/stress_test.cjs
 | 8 | Tabs & custom values | add/rename/remove tabs via drawer (BOARD rows in CSV), role→board assignment, active-tab fallback, "+ Add value…" custom dropdown values persist in the SETTING row and appear in filters, inline manager-role creation from the role form |
 | 9 | Hostile data | duplicate people/slate rows consolidated (fields merged, best readiness kept, types joined, approved kept), dangling successor references flagged as ERR without crashing, empty/garbage/header-only CSV rejected with state untouched, approving a successor whose person record is missing |
 | 10 | Insights | KPI numbers cross-checked against independently computed coverage/vacancy values; respects the filter bar |
-| 11 | Safety nets | dirty-flag lifecycle, localStorage auto-backup written and restorable after reload, Escape/backdrop drawer close |
+| 11 | Safety nets | dirty-flag lifecycle, localStorage auto-backup written and **auto-restored on reload with no clicks** (unsaved work stays flagged and the banner explains it), Escape/backdrop drawer close |
 | 12 | Scale | 3,000 people / 800 roles / 4,000 slate rows: load 281 ms, full board render 266 ms, serialize 849 ms, round-trip intact; capped tables stay responsive |
 | 13 | Chess view | opens from a role card with the incumbent as King and pieces ranked Queen→Pawn; piece-onto-piece drag swaps places (staged only — real rankings untouched); Save persists the order to state and CSV; staging a rule-blocked candidate shows the callout and Save refuses; taking the seat shows vacancy + steps-down callouts and on Save moves the incumbent, vacates the old role and persists; Close with staged moves asks to discard and changes nothing; the field picker updates every piece at once and "Make default for all boards" survives the CSV round-trip; the **piece bank** lists only off-slate people with live search, a bank piece dropped on the open board stages a New pawn (no real row until Save, then correct rank + CSV row), dropped on a square it takes that exact spot shifting others down, dropped on the throne it takes the seat on save, staged pieces can be removed, and discarding leaves the CSV byte-identical |
 | 14 | CSV simplicity | unknown CSV columns are preserved per record, re-exported, and byte-stable; "+ Add field" in the person drawer creates a new CSV column visible on every person; a ROLE row naming an unknown board auto-creates the tab (readable name, BOARD row written back); the org tree infers SVP→VP→Director family-tree lines by level+department, renders them dashed, and "Apply inferred lines" writes real managerRoleIds (undoable); starter template download |
+| 15 | File memory & sheet imports | the opened file's handle is remembered across sessions (IndexedDB verified on file://), the reconnect banner reopens it and Save overwrites it (full write-back verified via OPFS), an unusable stored handle fails gracefully with guidance and Forget clears it; **sheet merge imports**: a People sheet with human headers ("Name", "Shirt Size") merges with auto-generated IDs, unknown columns kept as extra fields, blank cells never wiping data, and nothing applied until Apply Import; a slate sheet resolves role titles and person names with dangling references skipped as ERRORs that appear in the downloadable error report; a roles sheet resolves manager-by-title and incumbent-by-name and auto-creates board tabs; Cancel leaves the database byte-identical; sheets dropped together are processed people→roles→slate regardless of drop order |
 
 ## Bugs found by the tests and fixed
 
