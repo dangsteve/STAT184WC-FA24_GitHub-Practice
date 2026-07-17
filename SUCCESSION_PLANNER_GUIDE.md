@@ -154,6 +154,14 @@ CSV and become available everywhere, including rule builders and filters.
   - **Bulk add fields**: paste one field per line (`Name, type, applies to`)
     to set up many columns at once.
 
+## Appearance (the 🎨 button)
+
+A little fun, zero risk: pick a **color theme** (Classic Blue, Forest, Royal
+Plum, Sunset, Ocean), a **chess piece set** (Classic, Royal Court, Animal
+Kingdom, Woodland), and a **board style** (Classic, Wood, Card Table, Marble).
+Choices apply instantly, are saved on your computer only, and never change the
+data or anyone else's view.
+
 ## Safety
 
 **Undo** (or `Ctrl+Z`) steps back through the last 40 changes. ⋯ → *Reset org

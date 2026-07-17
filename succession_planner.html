@@ -307,6 +307,36 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
 .node .ninf{font-size:9.5px;color:var(--faint);font-style:italic}
 .extra-fields{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-top:14px}
 .extra-fields .grid{margin-top:8px}
+/* ---------- appearance: color themes ---------- */
+html[data-theme="forest"]{--primary:#147a41;--primary-700:#0f5e33;--primary-50:#e9f6ef;--primary-100:#cdeadb}
+html[data-theme="plum"]{--primary:#6d28d9;--primary-700:#5b21b6;--primary-50:#f3eefc;--primary-100:#e4d9f7}
+html[data-theme="sunset"]{--primary:#c2570b;--primary-700:#9a4508;--primary-50:#fdf1e7;--primary-100:#f9ddc4}
+html[data-theme="ocean"]{--primary:#0e7490;--primary-700:#0b5c73;--primary-50:#e8f6fa;--primary-100:#cdeaf2}
+/* ---------- appearance: chess board styles ---------- */
+#chessOverlay.board-wood .square{background:#f7ead2}
+#chessOverlay.board-wood .square.alt{background:#dfc094}
+#chessOverlay.board-wood .square:hover{background:#f2dcae}
+#chessOverlay.board-wood .chess-grid{border-color:#c9a061;background:#fbf3e2}
+#chessOverlay.board-wood .throne{background:linear-gradient(180deg,#fdf6e7,#eed9b4);border-color:#c9a061}
+#chessOverlay.board-felt .square{background:#eaf6ef}
+#chessOverlay.board-felt .square.alt{background:#c9e7d4}
+#chessOverlay.board-felt .square:hover{background:#dcf0e4}
+#chessOverlay.board-felt .chess-grid{border-color:#9ccdb0;background:#f2faf5}
+#chessOverlay.board-felt .throne{background:linear-gradient(180deg,#f4fbf6,#d9eee1);border-color:#9ccdb0}
+#chessOverlay.board-marble .square{background:#f4f6fa}
+#chessOverlay.board-marble .square.alt{background:#d8dde6}
+#chessOverlay.board-marble .square:hover{background:#e8ecf3}
+#chessOverlay.board-marble .chess-grid{border-color:#b9c2d0;background:#eef1f6}
+#chessOverlay.board-marble .throne{background:linear-gradient(180deg,#fafbfd,#e2e7ee);border-color:#b9c2d0}
+/* ---------- appearance panel ---------- */
+.appearance-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.app-swatch{display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--surface);border:2px solid var(--line);border-radius:10px;padding:14px 10px;font-size:12.5px;font-weight:600;cursor:pointer;color:var(--ink)}
+.app-swatch:hover{border-color:var(--primary)}
+.app-swatch.selected{border-color:var(--primary);background:var(--primary-50)}
+.swatch-dot{width:26px;height:26px;border-radius:50%;box-shadow:inset 0 0 0 2px rgba(255,255,255,.5)}
+.swatch-pieces{font-size:19px;letter-spacing:2px;line-height:1.3}
+.swatch-board{display:grid;grid-template-columns:15px 15px;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.swatch-board i{width:15px;height:15px;display:block}
 .hidden{display:none!important}
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-thumb{background:#c4cede;border-radius:5px;border:2px solid transparent;background-clip:content-box}
@@ -338,6 +368,7 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
       <button class="btn btn-quiet" data-action="exportCSV" title="Download a copy of the CSV database">Export</button>
       <button class="btn btn-green" data-action="addChooser">+ Add</button>
       <button class="btn btn-quiet" data-action="undo" title="Undo last change (Ctrl+Z)">Undo</button>
+      <button class="btn btn-quiet" data-action="appearance" title="Appearance — themes and chess piece styles">&#127912;</button>
       <div class="menu-wrap">
         <button class="btn btn-quiet" data-action="toggleMenu" title="More actions">&#8943;</button>
         <div class="menu" id="moreMenu">
@@ -438,7 +469,23 @@ const NUM_RANGE_RE=/^\s*-?\d+(\.\d+)?(\s*-\s*-?\d+(\.\d+)?)?\s*$/;
    the contrast warning is covered by the always-on labeled legend) */
 const CHART_COLORS=['#2a78d6','#008300','#e87ba4','#eda100','#1baf7a','#eb6834'];
 const CHESS_DEFAULT_FIELDS=['title','readiness','candidateType'];
-const CHESS_PIECES=[['♛','Queen'],['♜','Rook'],['♝','Bishop'],['♞','Knight'],['♟','Pawn']];
+const PIECE_SETS={
+  classic:{name:'Classic chess',king:'♚',ranks:[['♛','Queen'],['♜','Rook'],['♝','Bishop'],['♞','Knight'],['♟','Pawn']]},
+  royal:{name:'Royal court',king:'👑',ranks:[['🏆','Queen'],['🎖️','Rook'],['🛡️','Bishop'],['⚔️','Knight'],['🎗️','Pawn']]},
+  animals:{name:'Animal kingdom',king:'🦁',ranks:[['🦅','Queen'],['🐻','Rook'],['🦊','Bishop'],['🐺','Knight'],['🐭','Pawn']]},
+  woodland:{name:'Woodland',king:'🌳',ranks:[['🦉','Queen'],['🦌','Rook'],['🦔','Bishop'],['🐿️','Knight'],['🍄','Pawn']]},
+};
+const APPEARANCE_KEY='succession_planner_appearance_v1';
+let appearance={theme:'classic',pieces:'classic',board:'classic'};
+try{const a=JSON.parse(localStorage.getItem(APPEARANCE_KEY)||'{}');if(a&&typeof a==='object')appearance={...appearance,...a}}catch(e){}
+function applyAppearance(){
+  document.documentElement.dataset.theme=appearance.theme||'classic';
+  try{localStorage.setItem(APPEARANCE_KEY,JSON.stringify(appearance))}catch(e){}
+}
+applyAppearance();
+function pieceSet(){return PIECE_SETS[appearance.pieces]||PIECE_SETS.classic}
+function pieceKing(){return pieceSet().king}
+function piecePawn(){return pieceSet().ranks[4][0]}
 const BACKUP_KEY='succession_planner_backup_v1';
 const LIST_CAP=400;   // max table rows rendered at once
 const PIECE_CAP=200;  // max candidate cards rendered at once
@@ -1982,7 +2029,7 @@ function chessFieldOptions(){
 }
 function chessFieldLabel(f){const hit=chessFieldOptions().find(([k])=>k===f);return hit?hit[1]:f}
 function chessActiveFields(){return chessSessionFields||chessDefaultFields||CHESS_DEFAULT_FIELDS}
-function chessPieceFor(i){return CHESS_PIECES[Math.min(i,CHESS_PIECES.length-1)]}
+function chessPieceFor(i){const r=pieceSet().ranks;return r[Math.min(i,r.length-1)]}
 function ordinal(n){return n+(n%10===1&&n%100!==11?'st':n%10===2&&n%100!==12?'nd':n%10===3&&n%100!==13?'rd':'th')}
 function displayFieldValue(s,f){
   const p=person(s.personId)||{};
@@ -2014,7 +2061,7 @@ function chessBankPeople(){
   return people.filter(p=>!onBoard.has(p.id)&&p.id!==r.incumbentPersonId&&[p.id,p.name,p.title,p.department,p.location].join(' ').toLowerCase().includes(q)).slice(0,80);
 }
 function chessBankListHtml(){
-  return chessBankPeople().map(p=>`<div class="bank-piece" draggable="true" data-drag="chessBank" data-person-id="${attr(p.id)}" title="Drag onto the board to add — onto a piece to take its spot, or onto the throne"><span class="bp-glyph">&#9823;</span><span class="bp-main"><b>${esc(p.name)}</b><span>${esc(p.title||p.department||p.id)}</span></span></div>`).join('')||'<div class="hint">No one matches.</div>';
+  return chessBankPeople().map(p=>`<div class="bank-piece" draggable="true" data-drag="chessBank" data-person-id="${attr(p.id)}" title="Drag onto the board to add — onto a piece to take its spot, or onto the throne"><span class="bp-glyph">${piecePawn()}</span><span class="bp-main"><b>${esc(p.name)}</b><span>${esc(p.title||p.department||p.id)}</span></span></div>`).join('')||'<div class="hint">No one matches.</div>';
 }
 function chessAddFromBank(pid,beforeEntryId){
   if(!chess||!person(pid))return;
@@ -2145,10 +2192,10 @@ function renderChessView(){
     </div>`;
   }).join('');
   const throne=staged
-    ?`<div class="throne staged" data-drop="chessKing"><div class="t-label">Taking the seat on save</div><span class="king">&#9818;</span><div class="t-name">${esc(personName(staged.personId))}</div><div class="t-sub">${esc(displayFieldValue(staged,'title')||'')}</div><div style="margin-top:8px"><button class="btn btn-quiet btn-sm" data-action="chessResetSeat">Undo this move</button></div></div>`
+    ?`<div class="throne staged" data-drop="chessKing"><div class="t-label">Taking the seat on save</div><span class="king">${pieceKing()}</span><div class="t-name">${esc(personName(staged.personId))}</div><div class="t-sub">${esc(displayFieldValue(staged,'title')||'')}</div><div style="margin-top:8px"><button class="btn btn-quiet btn-sm" data-action="chessResetSeat">Undo this move</button></div></div>`
     :(isRoleVacant(r)
-      ?`<div class="throne vacant" data-drop="chessKing"><div class="t-label">Empty throne</div><span class="king">&#9818;</span><div class="t-name" style="color:var(--red)">VACANT</div><div class="t-sub">Drag a piece here to take the seat</div></div>`
-      :`<div class="throne" data-drop="chessKing"><div class="t-label">King — current incumbent</div><span class="king">&#9818;</span><div class="t-name">${esc(personName(r.incumbentPersonId,r.incumbentName))}</div><div class="t-sub">Drag a piece onto the throne to replace</div></div>`);
+      ?`<div class="throne vacant" data-drop="chessKing"><div class="t-label">Empty throne</div><span class="king">${pieceKing()}</span><div class="t-name" style="color:var(--red)">VACANT</div><div class="t-sub">Drag a piece here to take the seat</div></div>`
+      :`<div class="throne" data-drop="chessKing"><div class="t-label">King — current incumbent</div><span class="king">${pieceKing()}</span><div class="t-name">${esc(personName(r.incumbentPersonId,r.incumbentName))}</div><div class="t-sub">Drag a piece onto the throne to replace</div></div>`);
   const stepsDown=staged&&r.incumbentPersonId&&r.incumbentPersonId!==staged.personId
     ?`<div class="steps-down"><b>${esc(personName(r.incumbentPersonId,r.incumbentName))}</b> steps down when you save.</div>`:'';
   const fieldsMenu=chess.menuOpen?`<div class="chess-fields-menu">
@@ -2187,7 +2234,7 @@ function renderChessView(){
       <select id="chessRoleSwitch">${chessRoleGroups().map(g=>`<optgroup label="${attr(g.name)}">${g.roles.map(x=>`<option value="${attr(x.id)}" ${x.id===r.id?'selected':''}>${esc(x.title)} · ${plur(slateFor(x.id).length,'candidate')}${isRoleVacant(x)?' · VACANT':''}</option>`).join('')}</optgroup>`).join('')}</select>
       <button class="btn btn-quiet btn-sm" data-action="chessNav" data-delta="1" title="Next role">Next &#8594;</button>
     </div>`;
-  el('chessOverlay').classList.remove('hidden');
+  el('chessOverlay').className='chess-overlay board-'+(appearance.board||'classic');
 }
 function saveChessView(){
   if(!chess)return;
@@ -3289,6 +3336,33 @@ Object.assign(ACTIONS,{
   addWidget:()=>openWidgetDrawer(),
   removeWidget:d=>removeWidget(d.widgetId),
 });
+/* =====================================================================
+   Appearance — personal, saved in this browser only, never in the CSV
+   ===================================================================== */
+const APP_THEMES=[['classic','Classic Blue','#0b66c2'],['forest','Forest','#147a41'],['plum','Royal Plum','#6d28d9'],['sunset','Sunset','#c2570b'],['ocean','Ocean','#0e7490']];
+const APP_BOARDS=[['classic','Classic','#eef1f6','#ffffff'],['wood','Wood','#dfc094','#f7ead2'],['felt','Card Table','#c9e7d4','#eaf6ef'],['marble','Marble','#d8dde6','#f4f6fa']];
+function openAppearanceDrawer(){
+  openDrawer('Appearance','A little fun. Your choices are saved on this computer only — they never change the data or anyone else’s view.',
+    `<div class="rule-section"><h3>Color Theme</h3><div class="appearance-grid">${APP_THEMES.map(([id,name,color])=>`<button type="button" class="app-swatch ${appearance.theme===id?'selected':''}" data-action="setTheme" data-value="${id}"><span class="swatch-dot" style="background:${color}"></span>${name}</button>`).join('')}</div></div>
+     <div class="rule-section"><h3>Chess Pieces</h3><div class="appearance-grid">${Object.entries(PIECE_SETS).map(([id,s])=>`<button type="button" class="app-swatch ${appearance.pieces===id?'selected':''}" data-action="setPieces" data-value="${id}"><span class="swatch-pieces">${s.king} ${s.ranks.map(r=>r[0]).join('')}</span>${s.name}</button>`).join('')}</div></div>
+     <div class="rule-section"><h3>Chess Board</h3><div class="appearance-grid">${APP_BOARDS.map(([id,name,alt,main])=>`<button type="button" class="app-swatch ${appearance.board===id?'selected':''}" data-action="setBoard" data-value="${id}"><span class="swatch-board"><i style="background:${main}"></i><i style="background:${alt}"></i><i style="background:${alt}"></i><i style="background:${main}"></i></span>${name}</button>`).join('')}</div></div>`,
+    ()=>closeDrawer(),'');
+  el('drawerSave').style.display='none';
+}
+function setAppearance(key,value){
+  appearance[key]=value;
+  applyAppearance();
+  if(chess)renderChessView();
+  openAppearanceDrawer(); // refresh the selection highlight
+}
+Object.assign(ACTIONS,{
+  appearance:()=>openAppearanceDrawer(),
+  setTheme:d=>setAppearance('theme',d.value),
+  setPieces:d=>setAppearance('pieces',d.value),
+  setBoard:d=>setAppearance('board',d.value),
+});
+Object.assign(window.__APP__,{openAppearanceDrawer,setAppearance,applyAppearance,pieceSet,pieceKing,piecePawn});
+Object.defineProperty(window.__APP__,'appearance',{get:()=>appearance});
 document.addEventListener('change',e=>{
   const t=e.target;
   if(t.id==='wSource'||t.id==='wKind')return openWidgetDrawer({title:v('wTitle'),source:v('wSource'),kind:v('wKind')});

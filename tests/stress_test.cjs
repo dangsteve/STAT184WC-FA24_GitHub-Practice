@@ -1908,7 +1908,44 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     20. SCREENSHOTS for the report
+     20. APPEARANCE (themes, piece sets, board styles)
+     =================================================================== */
+  section('20. Appearance');
+  await test('appearance panel: theme applies instantly, persists per-browser, never dirties data', async () => {
+    await loadBase(page);
+    assertEq((await counts(page)).dirty, false, 'clean before');
+    await clickAction(page, 'appearance');
+    await page.click('[data-action="setTheme"][data-value="forest"]');
+    assertEq(await page.evaluate(() => document.documentElement.dataset.theme), 'forest', 'theme applied');
+    assert(await page.evaluate(() => localStorage.getItem('succession_planner_appearance_v1').includes('forest')), 'saved locally');
+    assertEq((await counts(page)).dirty, false, 'appearance never marks data unsaved');
+    await clickAction(page, 'closeDrawer');
+    await page.reload();
+    await page.waitForFunction(() => window.__APP__ && __APP__.roles.length > 0);
+    assertEq(await page.evaluate(() => document.documentElement.dataset.theme), 'forest', 'theme survives reload');
+  });
+  await test('woodland pieces + wood board show up on the chess view', async () => {
+    await clickAction(page, 'appearance');
+    await page.click('[data-action="setPieces"][data-value="woodland"]');
+    await page.click('[data-action="setBoard"][data-value="wood"]');
+    await clickAction(page, 'closeDrawer');
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    const look = await page.evaluate(() => ({
+      king: document.querySelector('#chessOverlay .throne .king').textContent,
+      queen: document.querySelector('#chessOverlay .square .pglyph').textContent,
+      pawn: document.querySelector('.bank-piece .bp-glyph').textContent,
+      board: document.getElementById('chessOverlay').classList.contains('board-wood'),
+    }));
+    assertEq(look.king, '🌳', 'woodland king on the throne');
+    assertEq(look.queen, '🦉', 'woodland queen is first in line');
+    assertEq(look.pawn, '🍄', 'bank pieces are woodland pawns');
+    assert(look.board, 'wood board style applied');
+    await page.evaluate(() => __APP__.closeChessView(true));
+    await page.evaluate(() => { __APP__.setAppearance('theme', 'classic'); __APP__.setAppearance('pieces', 'classic'); __APP__.setAppearance('board', 'classic'); __APP__.closeDrawer(); });
+  });
+
+  /* ===================================================================
+     21. SCREENSHOTS for the report
      =================================================================== */
   section('13. Screenshots');
   await test('capture UI screenshots', async () => {
