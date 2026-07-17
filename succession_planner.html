@@ -2212,6 +2212,7 @@ function renderChessView(){
       <div class="hint">Drag a piece onto another to swap places. Drag onto the throne to take the seat. Nothing changes until you press Save.</div>
       ${pending?'<span class="pending-chip">Unsaved moves</span>':''}
       <div class="chess-fields-wrap"><button class="btn btn-quiet btn-sm" data-action="chessFieldsMenu">Fields shown</button>${fieldsMenu}</div>
+      <button class="btn btn-quiet btn-sm" data-action="appearance" title="Appearance — restyle the board and pieces live">&#127912;</button>
       <button class="btn btn-quiet btn-sm" data-action="chessClose">Close</button>
       <button class="btn btn-primary btn-sm" data-action="chessSave">Save</button>
     </div>

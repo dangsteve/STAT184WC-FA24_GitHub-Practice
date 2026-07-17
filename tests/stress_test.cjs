@@ -1943,6 +1943,26 @@ function parseCsvRows(text) {
     await page.evaluate(() => __APP__.closeChessView(true));
     await page.evaluate(() => { __APP__.setAppearance('theme', 'classic'); __APP__.setAppearance('pieces', 'classic'); __APP__.setAppearance('board', 'classic'); __APP__.closeDrawer(); });
   });
+  await test('appearance opens from the chess header and restyles the board live', async () => {
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    assert(await page.locator('#chessOverlay [data-action="appearance"]').count() === 1, 'palette button in the chess header');
+    await page.click('#chessOverlay [data-action="appearance"]');
+    assert(await page.evaluate(() => document.getElementById('drawer').classList.contains('open')), 'appearance panel opens over the board');
+    await page.click('[data-action="setPieces"][data-value="animals"]');
+    await page.click('[data-action="setBoard"][data-value="marble"]');
+    const live = await page.evaluate(() => ({
+      king: document.querySelector('#chessOverlay .throne .king').textContent,
+      board: document.getElementById('chessOverlay').classList.contains('board-marble'),
+      panelStillOpen: document.getElementById('drawer').classList.contains('open'),
+    }));
+    assertEq(live.king, '🦁', 'pieces restyle live behind the panel');
+    assert(live.board, 'board restyles live');
+    assert(live.panelStillOpen, 'panel stays open while previewing');
+    await clickAction(page, 'closeDrawer');
+    assert(await page.evaluate(() => !!__APP__.chess), 'closing the panel returns to the chess board');
+    await page.evaluate(() => __APP__.closeChessView(true));
+    await page.evaluate(() => { __APP__.setAppearance('pieces', 'classic'); __APP__.setAppearance('board', 'classic'); __APP__.closeDrawer(); });
+  });
 
   /* ===================================================================
      21. SCREENSHOTS for the report
