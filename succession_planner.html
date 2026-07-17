@@ -159,8 +159,13 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
 .drop-hint{border:1px dashed var(--line);border-radius:8px;color:var(--faint);font-size:11px;padding:8px;text-align:center}
 .role-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
 
-/* ---------- org tree ---------- */
-.tree{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:24px;min-height:300px;overflow:auto;display:flex;justify-content:flex-start;text-align:center}
+/* ---------- org tree (pan & zoom canvas) ---------- */
+.tree{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);height:calc(100vh - 275px);min-height:420px;overflow:hidden;cursor:grab;text-align:center;user-select:none}
+.tree.dragging{cursor:grabbing}
+.tree-canvas{position:absolute;left:0;top:0;transform-origin:0 0;padding:24px;width:max-content}
+.tree-controls{position:absolute;right:12px;top:12px;z-index:3;display:flex;flex-direction:column;gap:6px}
+.tree-controls .btn{padding:6px 10px;box-shadow:var(--shadow)}
+.tree-hint{position:absolute;left:12px;bottom:10px;z-index:3;font-size:11px;color:var(--faint);background:rgba(255,255,255,.85);border-radius:6px;padding:3px 8px;pointer-events:none}
 .tree-item{display:flex;flex-direction:column;align-items:center}
 .node{min-width:170px;max-width:230px;border:1px solid var(--line);border-top:3px solid var(--primary);border-radius:9px;background:var(--surface);margin:7px;padding:9px 11px;box-shadow:var(--shadow);cursor:pointer;text-align:left}
 .node:hover{border-color:var(--primary)}
@@ -341,6 +346,8 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
           <button data-action="exportXlsx">Export Excel workbook (.xlsx)</button>
           <button data-action="shareExport">Share / export a board&hellip;</button>
           <button data-action="downloadTemplate">Download starter template</button>
+          <div class="sep"></div>
+          <button data-action="dataTools">Data Tools (developer)&hellip;</button>
           <button data-action="downloadSheetTemplates">Download simple sheet templates</button>
           <div class="sep"></div>
           <button data-action="resetOrg">Reset org changes to import</button>
@@ -423,7 +430,8 @@ const SYSTEM_BOARDS=['MASTER','ALL','PEOPLE','INSIGHTS','RULES','HISTORY'];
 const SYSTEM_TABS=[{id:'MASTER',name:'Org Tree'},{id:'ALL',name:'All Roles'},{id:'PEOPLE',name:'Candidates'},{id:'INSIGHTS',name:'Insights'},{id:'RULES',name:'Rules'},{id:'HISTORY',name:'History'}];
 const DEFAULT_LEVELS=['CEO','C-Suite','EVP','SVP','VP','Sr Director','Director','Senior Manager','Manager','Individual Contributor'];
 const CANDIDATE_FIELDS=['readiness','source','candidateType','confidence','location','jobLevel','performance','potential','retentionRisk','mobility','criticalExperience','skills','department'];
-const TEXT_OPERATORS=['contains','not contains'];
+const TEXT_OPERATORS=['contains','not contains','greater than','less than'];
+const FIELD_TYPES=['text','number','boolean'];
 const CHESS_DEFAULT_FIELDS=['title','readiness','candidateType'];
 const CHESS_PIECES=[['♛','Queen'],['♜','Rook'],['♝','Bishop'],['♞','Knight'],['♟','Pawn']];
 const BACKUP_KEY='succession_planner_backup_v1';
@@ -435,6 +443,7 @@ let fileHandle=null,selectedPersonId='',backRoleId='',undoStack=[],importBaselin
 let activeTab='MASTER',dirty=false,backupTimer=null,automationDepth=0;
 let chess=null,chessSessionFields=null,chessDefaultFields=null,lastInferred=null;
 let bannerState={backup:null,fileName:''},reconnectHandle=null,importReview=null;
+let fieldTypes={},treeView=null,treeClickSuppressed=false;
 
 function systemBoards(){return SYSTEM_TABS.map(t=>({id:t.id,name:t.name}))}
 function uid(p){return p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)}
@@ -573,7 +582,13 @@ function clearAll(){
 /* ---------- custom dropdown values ---------- */
 function fieldKeyFromSelectId(id){return{pReady:'readiness',pSource:'source',pType:'candidateType',pPerf:'performance',pPot:'potential',pRet:'retentionRisk',pMob:'mobility',pConf:'confidence',pJob:'jobLevel',rLevel:'level',rDept:'department',pDept:'department',pLoc:'location',rBoard:'board',rManager:'managerRole',rRisk:'risk',rCrit:'criticality'}[id]||id||'custom'}
 function addCustomValue(field,value){field=field||'custom';value=String(value||'').trim();if(!value)return;if(!customFieldValues[field])customFieldValues[field]=[];if(!customFieldValues[field].includes(value))customFieldValues[field].push(value)}
-function getFieldValue(p,s,field){if(field in (p||{}))return p[field];if(field in (s||{}))return s[field];return ''}
+function getFieldValue(p,s,field){
+  if(field in (p||{}))return p[field];
+  if(field in (s||{}))return s[field];
+  const px=(p||{})._x||{};if(field in px)return px[field];
+  const sx=(s||{})._x||{};if(field in sx)return sx[field];
+  return '';
+}
 function valuesForField(field,base=[]){
   const data=[];
   const pIdx=new Map(people.map(p=>[p.id,p]));
@@ -698,7 +713,7 @@ function loadCSV(text){
   // columns this app doesn't know yet are preserved on each record and written back on save
   const extraCols=headers.filter(h=>h&&!CSV_HEADERS.includes(h));
   const grabExtras=o=>extraCols.length?Object.fromEntries(extraCols.map(h=>[h,o[h]||''])):undefined;
-  boards=systemBoards();roles=[];people=[];successors=[];rules=[];history=[];messages=[];customFieldValues={};chessDefaultFields=null;
+  boards=systemBoards();roles=[];people=[];successors=[];rules=[];history=[];messages=[];customFieldValues={};chessDefaultFields=null;fieldTypes={};treeView=null;
   rows.slice(1).forEach(row=>{
     const o={};headers.forEach((h,i)=>o[h]=row[i]||'');
     if(!Object.values(o).some(x=>String(x).trim()))return;
@@ -719,6 +734,7 @@ function loadCSV(text){
     if(o.recordType==='HISTORY'&&o.historyId)history.push({id:o.historyId,date:o.historyDate,action:o.historyAction,details:o.historyDetails});
     if(o.recordType==='SETTING'&&o.settingKey==='customFieldValues'){try{customFieldValues=JSON.parse(o.settingValue||'{}')||{}}catch(e){customFieldValues={}}}
     if(o.recordType==='SETTING'&&o.settingKey==='chessFields'){try{const f=JSON.parse(o.settingValue||'null');if(Array.isArray(f))chessDefaultFields=f}catch(e){}}
+    if(o.recordType==='SETTING'&&o.settingKey==='fieldTypes'){try{const f=JSON.parse(o.settingValue||'{}');if(f&&typeof f==='object')fieldTypes=f}catch(e){}}
   });
   consolidateDuplicateData(true);
   validateDataLinks();
@@ -750,6 +766,7 @@ function toCSV(data){
   (d.history||[]).forEach(h=>put({recordType:'HISTORY',historyId:h.id,historyDate:h.date,historyAction:h.action,historyDetails:h.details}));
   put({recordType:'SETTING',settingKey:'customFieldValues',settingValue:JSON.stringify(d.customFieldValues||{})});
   put({recordType:'SETTING',settingKey:'chessFields',settingValue:JSON.stringify(d.chessFields||chessDefaultFields||CHESS_DEFAULT_FIELDS)});
+  put({recordType:'SETTING',settingKey:'fieldTypes',settingValue:JSON.stringify(d.fieldTypes||fieldTypes||{})});
   return rows.join('\n');
 }
 function downloadTemplate(){
@@ -916,6 +933,11 @@ function compare(val,op,w){
   if(op==='not equals')return val2!==wn;
   if(op==='contains')return !!wn&&val2.includes(wn);
   if(op==='not contains')return !wn||!val2.includes(wn);
+  if(op==='greater than'||op==='less than'){
+    const a=parseFloat(String(val??'').replace(/,/g,'')),b=parseFloat(String(w??'').replace(/,/g,''));
+    if(isNaN(a)||isNaN(b))return false;
+    return op==='greater than'?a>b:a<b;
+  }
   if(op==='list'||op==='in list')return list.includes(val2);
   return false;
 }
@@ -1196,11 +1218,87 @@ function renderTree(){
   roles.forEach(r=>{const p=parents.get(r.id);if(p){const a=kidsMap.get(p.id);if(a)a.push(r);else kidsMap.set(p.id,[r])}});
   kidsMap.forEach(a=>a.sort((x,y)=>(+x.sortOrder||999)-(+y.sortOrder||999)));
   const roots=roles.filter(r=>!parents.has(r.id));
-  el('mainView').innerHTML='<div class="tree">'+(roots.length
-    ?'<div class="tree-item" style="flex-direction:row;align-items:flex-start">'+roots.map(r=>treeNode(r,kidsMap,parents,new Set())).join('')+'</div>'
-    :(roles.length
+  if(!roots.length){
+    el('mainView').innerHTML=roles.length
       ?emptyState('Could not find a top role','Reporting lines seem to form a loop — open a role and fix its Manager Role.')
-      :emptyState('No data yet','Open your CSV database or add your first role.',`<button class="btn btn-quiet" data-action="openCSV">Open CSV</button> <button class="btn btn-primary" data-action="openRoleDrawerNew" style="margin-left:6px">+ Add Role</button>`)))+'</div>';
+      :emptyState('No data yet','Open your CSV database or add your first role.',`<button class="btn btn-quiet" data-action="openCSV">Open CSV</button> <button class="btn btn-primary" data-action="openRoleDrawerNew" style="margin-left:6px">+ Add Role</button>`);
+    return;
+  }
+  el('mainView').innerHTML=`<div class="tree" id="treeViewport">
+    <div class="tree-canvas" id="treeCanvas"><div class="tree-item" style="flex-direction:row;align-items:flex-start">${roots.map(r=>treeNode(r,kidsMap,parents,new Set())).join('')}</div></div>
+    <div class="tree-controls">
+      <button class="btn btn-quiet btn-sm" data-action="treeZoom" data-delta="1" title="Zoom in">+</button>
+      <button class="btn btn-quiet btn-sm" data-action="treeZoom" data-delta="-1" title="Zoom out">&minus;</button>
+      <button class="btn btn-quiet btn-sm" data-action="treeReset" title="Fit and center">Fit</button>
+    </div>
+    <div class="tree-hint">Scroll to zoom · hold and drag to move · click a role to open it</div>
+  </div>`;
+  initTreeView();
+}
+function applyTreeView(){
+  const c=el('treeCanvas');
+  if(c&&treeView)c.style.transform=`translate(${treeView.x}px,${treeView.y}px) scale(${treeView.scale})`;
+}
+function fitTreeView(){
+  const vp=el('treeViewport'),c=el('treeCanvas');
+  if(!vp||!c)return;
+  const cw=Math.max(1,c.offsetWidth),ch=Math.max(1,c.offsetHeight);
+  const vw=vp.clientWidth,vh=vp.clientHeight;
+  // fit the whole tree when possible, but never below a readable zoom —
+  // huge trees open centered on the top of the chart instead of ant-sized
+  const fit=Math.min(1,(vw-30)/cw,(vh-30)/ch)*0.96;
+  const s=Math.max(0.5,fit);
+  treeView={x:(vw-cw*s)/2,y:fit>=0.5?Math.max(14,(vh-ch*s)/2):14,scale:s};
+  applyTreeView();
+}
+function initTreeView(){
+  const vp=el('treeViewport');
+  if(!vp)return;
+  if(treeView)applyTreeView();else fitTreeView();
+  vp.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const rect=vp.getBoundingClientRect();
+    const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+    const f=e.deltaY<0?1.12:0.89;
+    const ns=Math.min(2.5,Math.max(0.15,treeView.scale*f));
+    const k=ns/treeView.scale;
+    treeView={x:mx-(mx-treeView.x)*k,y:my-(my-treeView.y)*k,scale:ns};
+    applyTreeView();
+  },{passive:false});
+  let drag=null;
+  vp.addEventListener('pointerdown',e=>{
+    if(e.button!==0||e.target.closest('.tree-controls'))return;
+    drag={sx:e.clientX,sy:e.clientY,ox:treeView.x,oy:treeView.y,moved:false,pid:e.pointerId,captured:false};
+    vp.classList.add('dragging');
+  });
+  vp.addEventListener('pointermove',e=>{
+    if(!drag)return;
+    const dx=e.clientX-drag.sx,dy=e.clientY-drag.sy;
+    if(Math.abs(dx)+Math.abs(dy)>4){
+      drag.moved=true;
+      // capture only once a real drag starts — capturing on pointerdown would
+      // retarget the click to the viewport and break opening roles
+      if(!drag.captured){try{vp.setPointerCapture(drag.pid)}catch(err){}drag.captured=true}
+    }
+    if(drag.moved){treeView.x=drag.ox+dx;treeView.y=drag.oy+dy;applyTreeView()}
+  });
+  const endDrag=()=>{
+    if(drag&&drag.moved){treeClickSuppressed=true;setTimeout(()=>{treeClickSuppressed=false},50)}
+    drag=null;vp.classList.remove('dragging');
+  };
+  vp.addEventListener('pointerup',endDrag);
+  vp.addEventListener('pointercancel',endDrag);
+  vp.addEventListener('click',e=>{if(treeClickSuppressed){e.stopPropagation();e.preventDefault()}},true);
+}
+function treeZoomBy(delta){
+  const vp=el('treeViewport');
+  if(!vp||!treeView)return;
+  const f=delta>0?1.25:0.8;
+  const ns=Math.min(2.5,Math.max(0.15,treeView.scale*f));
+  const k=ns/treeView.scale;
+  const cx=vp.clientWidth/2,cy=vp.clientHeight/2;
+  treeView={x:cx-(cx-treeView.x)*k,y:cy-(cy-treeView.y)*k,scale:ns};
+  applyTreeView();
 }
 function treeNode(r,kidsMap,parents,seen){
   if(seen.has(r.id))return '';
@@ -1378,10 +1476,22 @@ function rulePersonOptions(sel=''){return '<option value=""></option>'+people.ma
 
 /* ---------- user-defined extra fields (future CSV columns) ---------- */
 function extraKeysFor(list){const s=new Set();list.forEach(e=>Object.keys(e._x||{}).forEach(k=>s.add(k)));return[...s].sort((a,b)=>a.localeCompare(b))}
-function extraFieldsSection(entity,list){
-  const keys=extraKeysFor(list);
-  const inputs=keys.map(k=>`<div><label>${esc(k)}</label><input class="extraField" data-extra-key="${attr(k)}" value="${attr((entity._x||{})[k]||'')}"></div>`).join('');
-  return `<div class="extra-fields"><div class="side-title" style="margin-bottom:2px">Additional Fields</div><div class="hint">Your own columns. They are saved as extra columns in the CSV, so the template grows with you — and columns added straight to the CSV show up here too.</div><div class="grid">${inputs}</div><button type="button" class="btn btn-quiet btn-sm" style="margin-top:10px" data-action="addExtraField">+ Add field</button></div>`;
+function fieldTypeOf(name){return (fieldTypes[name]||{}).type||'text'}
+function extraKeysWithRegistry(list,kind){
+  const s=new Set(extraKeysFor(list));
+  Object.entries(fieldTypes).forEach(([k,def])=>{if(!def)return;const on=def.on||'all';if(on==='all'||on===kind)s.add(k)});
+  return[...s].sort((a,b)=>a.localeCompare(b));
+}
+function extraFieldInput(k,val){
+  const t=fieldTypeOf(k);
+  if(t==='boolean')return `<select class="extraField" data-extra-key="${attr(k)}"><option value=""></option><option ${norm(val)==='true'?'selected':''}>true</option><option ${norm(val)==='false'?'selected':''}>false</option></select>`;
+  if(t==='number')return `<input type="number" step="any" class="extraField" data-extra-key="${attr(k)}" value="${attr(val||'')}">`;
+  return `<input class="extraField" data-extra-key="${attr(k)}" value="${attr(val||'')}">`;
+}
+function extraFieldsSection(entity,list,kind){
+  const keys=extraKeysWithRegistry(list,kind);
+  const inputs=keys.map(k=>`<div><label>${esc(k)}${fieldTypeOf(k)!=='text'?` <span class="chip">${fieldTypeOf(k)}</span>`:''}</label>${extraFieldInput(k,(entity._x||{})[k]||'')}</div>`).join('');
+  return `<div class="extra-fields"><div class="side-title" style="margin-bottom:2px">Additional Fields</div><div class="hint">Your own columns. They are saved as extra columns in the CSV, so the template grows with you — and columns added straight to the CSV show up here too. Set types and bulk-add fields in ⋯ &rarr; Data Tools.</div><div class="grid">${inputs}</div><button type="button" class="btn btn-quiet btn-sm" style="margin-top:10px" data-action="addExtraField">+ Add field</button></div>`;
 }
 function collectExtras(existing){
   const out={...(existing||{})};
@@ -1452,7 +1562,7 @@ function openPersonDrawer(id='',fromRole='',defaultType='Successor'){
   if(id&&!p){notice('ERR','Person not found: '+id);return}
   backRoleId=fromRole||'';
   openDrawer(id?p.name:'Add Employee / Candidate',id?`${p.title||'No title'} · ${p.id}`:'Candidate details drive rules and slate placement.',
-    personForm(p)+extraFieldsSection(p,people)+(id?personSlateSection(id):''),
+    personForm(p)+extraFieldsSection(p,people,'person')+(id?personSlateSection(id):''),
     ()=>savePerson(id),
     (id?`<button type="button" class="btn btn-danger" data-action="deletePerson" data-person-id="${attr(id)}">Delete Person</button>`:'')+`<button type="button" class="btn btn-quiet" data-action="openRoleDrawerNew">Add Role</button>`,
     !!fromRole);
@@ -1528,7 +1638,7 @@ function openRoleDrawer(id=''){
       <div><label>Status</label><input id="rStatus" value="${attr(r.status)}"></div>
       <div><label>Sort Order</label><input id="rSort" type="number" value="${attr(r.sortOrder)}"></div>
     </div>
-    ${extraFieldsSection(r,roles)}
+    ${extraFieldsSection(r,roles,'role')}
     <div class="drawer-section-title">Candidate Slate</div>${slate}`,
     ()=>saveRole(id),
     id?`<button class="btn btn-danger" data-action="deleteRole" data-role-id="${attr(id)}">Delete Role</button> <button class="btn btn-green" data-action="addCandidateFromRole" data-role-id="${attr(id)}">Add Candidate</button> <button class="btn btn-quiet" data-action="openChess" data-role-id="${attr(id)}">♞ Chess View</button>`
@@ -1574,7 +1684,15 @@ function deleteRole(id){
 }
 
 /* ---------- rule drawer ---------- */
-function fieldOptions(selected=''){return CANDIDATE_FIELDS.map(f=>`<option ${f===selected?'selected':''}>${f}</option>`).join('')}
+function ruleFieldChoices(){
+  const extras=new Set([...extraKeysFor(people),...extraKeysFor(successors),...Object.keys(fieldTypes)]);
+  return[...CANDIDATE_FIELDS,...[...extras].sort((a,b)=>a.localeCompare(b))];
+}
+function fieldOptions(selected=''){
+  const choices=ruleFieldChoices();
+  if(selected&&!choices.includes(selected))choices.unshift(selected);
+  return choices.map(f=>`<option value="${attr(f)}" ${f===selected?'selected':''}>${esc(f)}</option>`).join('');
+}
 function selectedValues(value){return String(value||'').split('|').filter(Boolean)}
 function checkboxId(){return 'cb-'+Math.random().toString(36).slice(2,9)}
 function valueSelectForField(field,selected=''){
@@ -1638,7 +1756,7 @@ function conditionRowHtml(c={field:'readiness',operator:'equals',value:'Ready No
   const opOpt=(val,label)=>`<option value="${val}" ${op===val?'selected':''}>${label}</option>`;
   return `<div class="condition-row">
     <div><label>Candidate Field</label><select class="condField">${fieldOptions(c.field)}</select></div>
-    <div><label>Operator</label><select class="condOperator">${opOpt('equals','equal to')+opOpt('not equals','not equal to')+opOpt('contains','contains')+opOpt('not contains','does not contain')+opOpt('list','any of (list)')}</select></div>
+    <div><label>Operator</label><select class="condOperator">${opOpt('equals','equal to')+opOpt('not equals','not equal to')+opOpt('contains','contains')+opOpt('not contains','does not contain')+opOpt('greater than','greater than (number)')+opOpt('less than','less than (number)')+opOpt('list','any of (list)')}</select></div>
     <div><label>Value</label><div class="condValueBox">${valueControlForCondition(c.field,op,c.value||'')}</div></div>
     <button class="btn btn-danger btn-sm" type="button" data-action="removeParent" data-target=".condition-row" style="align-self:end">Remove</button>
   </div>`;
@@ -2096,6 +2214,8 @@ const ACTIONS={
   chessNav:d=>chessNav(+d.delta),
   chessSetDefault:()=>chessSetDefaultFields(),
   applyInferred:()=>applyInferredLines(),
+  treeZoom:d=>treeZoomBy(+d.delta),
+  treeReset:()=>fitTreeView(),
   downloadTemplate:()=>{el('moreMenu').classList.remove('open');downloadTemplate()},
   addExtraField:()=>addExtraFieldPrompt(),
 };
@@ -2290,11 +2410,20 @@ function slugIdIn(list,prefix,label){
   let id=base,i=2;
   while(true){const ex=list.find(e=>e.id===id);if(!ex)return id;if(norm(ex.name||ex.title)===norm(label))return id;id=base+'-'+(i++)}
 }
-function buildSheetImport(fileTexts,dbExtras){
-  const staged={people:deepClone(people),roles:deepClone(roles),successors:deepClone(successors),boards:deepClone(boards),rules:deepClone(rules),history:deepClone(history),customFieldValues:deepClone(customFieldValues)};
+function buildSheetImport(fileTexts,dbExtras,base){
+  const src=base||{people,roles,successors,boards,rules,history,customFieldValues};
+  const staged={people:deepClone(src.people||[]),roles:deepClone(src.roles||[]),successors:deepClone(src.successors||[]),boards:deepClone(src.boards||systemBoards()),rules:deepClone(src.rules||[]),history:deepClone(src.history||[]),customFieldValues:deepClone(src.customFieldValues||{})};
   const report=[];
   const stats={peopleAdded:0,peopleUpdated:0,rolesAdded:0,rolesUpdated:0,slateAdded:0,slateUpdated:0,errors:0,warnings:0,other:0};
   const add=(file,row,sheet,id,field,severity,problem,action)=>{report.push({file,row,sheet,id:id||'',field:field||'',severity,problem,action:action||''});if(severity==='ERROR')stats.errors++;else if(severity==='WARNING')stats.warnings++;else stats.other++};
+  const checkTypedExtras=(x,file,row,label,id)=>{
+    Object.entries(x||{}).forEach(([k,val])=>{
+      const t=fieldTypeOf(k);const v=String(val??'').trim();
+      if(!v)return;
+      if(t==='number'&&!/^-?[\d,]*\.?\d+$/.test(v))add(file,row,label,id,k,'WARNING',`"${k}" is a Number field but got "${v}"`,'Imported as-is');
+      if(t==='boolean'&&!['true','false'].includes(v.toLowerCase()))add(file,row,label,id,k,'WARNING',`"${k}" is a True/False field but got "${v}"`,'Imported as-is');
+    });
+  };
   const findPerson=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=staged.people.find(p=>p.id===ref);if(hit)return hit;const byName=staged.people.filter(p=>norm(p.name)===norm(ref));return byName.length===1?byName[0]:(byName.length?'AMBIG':null)};
   const findRole=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=staged.roles.find(r=>r.id===ref);if(hit)return hit;const byTitle=staged.roles.filter(r=>norm(r.title)===norm(ref));return byTitle.length===1?byTitle[0]:(byTitle.length?'AMBIG':null)};
   const knownReadiness=new Set([...valuesForField('readiness',['Ready Now','1-2 Years','3-5 Years'])].map(norm));
@@ -2337,7 +2466,7 @@ function buildSheetImport(fileTexts,dbExtras){
           staged.people.push(p);stats.peopleAdded++;
         }else stats.peopleUpdated++;
         Object.entries(PERSON_KEYMAP).forEach(([canon,ek])=>{if(String(o[canon]??'').trim()!=='')p[ek]=o[canon]});
-        if(Object.keys(x).length)p._x={...(p._x||{}),...x};
+        if(Object.keys(x).length){p._x={...(p._x||{}),...x};checkTypedExtras(x,sheet.ft.name,rowNum,label,id)}
         if(String(o.readiness||'').trim()&&!knownReadiness.has(norm(o.readiness)))add(sheet.ft.name,rowNum,label,id,'readiness','WARNING',`New readiness value "${o.readiness}"`,'Imported as-is');
       }
       if(sheet.type==='ROLES'){
@@ -2447,7 +2576,9 @@ function openImportReview(review){
   const s=review.stats;
   const sevBadge=s=>s==='ERROR'?'<span class="badge red">Error</span>':s==='WARNING'?'<span class="badge amber">Warning</span>':'<span class="badge gray">Info</span>';
   const issueRows=review.report.slice(0,200).map(i=>`<tr><td>${sevBadge(i.severity)}</td><td style="white-space:nowrap">${esc(i.file)} · row ${i.row}</td><td>${esc(i.sheet)}</td><td>${esc(i.id)}</td><td>${esc(i.problem)}</td><td>${esc(i.action)}</td></tr>`).join('');
-  openDrawer('Import Review','Sheets: '+review.files.join(', ')+' — nothing is saved until you press Apply Import.',
+  const isConvert=review.mode==='convert';
+  openDrawer(isConvert?'Convert to Planner CSV':'Import Review',
+    (isConvert?'Converting: ':'Sheets: ')+review.files.join(', ')+(isConvert?' — your open database is not touched; the result downloads as a CSV file.':' — nothing is saved until you press Apply Import.'),
     `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
       <div class="kpi"><b>${s.peopleAdded+s.peopleUpdated}</b><small>People</small><div class="sub">${s.peopleAdded} new · ${s.peopleUpdated} updated</div></div>
       <div class="kpi"><b>${s.rolesAdded+s.rolesUpdated}</b><small>Roles</small><div class="sub">${s.rolesAdded} new · ${s.rolesUpdated} updated</div></div>
@@ -2460,11 +2591,22 @@ function openImportReview(review){
       ?`<div class="tablebox"><table class="table"><thead><tr><th></th><th>Where</th><th>Sheet</th><th>Record</th><th>Problem</th><th>What was done</th></tr></thead><tbody>${issueRows}</tbody></table>${review.report.length>200?`<div class="tfoot-note">Showing 200 of ${review.report.length} — the downloadable report has everything.</div>`:''}</div>`
       :'<div class="notice ok">No issues found — every row lines up cleanly.</div>'),
     ()=>applyImport(),
-    `<button class="btn btn-danger" data-action="importCancel">Cancel Import</button> ${review.report.length?'<button class="btn btn-quiet" data-action="downloadImportReport">Download error report</button>':''}`);
-  el('drawerSave').textContent='Apply Import';
+    `<button class="btn btn-danger" data-action="importCancel">Cancel</button> ${review.report.length?'<button class="btn btn-quiet" data-action="downloadImportReport">Download error report</button>':''}`);
+  el('drawerSave').textContent=isConvert?'Download converted CSV':'Apply Import';
+}
+function convertedCsvFromReview(review){
+  const d=review.staged;
+  return toCSV({boards:d.boards,people:d.people,roles:d.roles,successors:d.successors,rules:d.rules,history:[],customFieldValues:d.customFieldValues,chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS,fieldTypes});
 }
 function applyImport(){
   if(!importReview)return;
+  if(importReview.mode==='convert'){
+    download(importReview.outName||'converted_planner.csv',convertedCsvFromReview(importReview),'text/csv');
+    notice('OK','Converted CSV downloaded — open it with Open CSV whenever you want.');
+    importReview=null;
+    closeDrawer();
+    return;
+  }
   pushUndo('Import sheets');
   people=importReview.staged.people;roles=importReview.staged.roles;successors=importReview.staged.successors;boards=importReview.staged.boards;
   rules=importReview.staged.rules;history=importReview.staged.history;customFieldValues=importReview.staged.customFieldValues;
@@ -2513,6 +2655,8 @@ Object.assign(ACTIONS,{
 Object.assign(window.__APP__,{startSheetImport,buildSheetImport,applyImport,buildImportReportCsv,downloadImportReport,downloadSheetTemplates,detectSheetType,normalizeHeader,idbSet,idbGet,idbDel,reconnectStoredFile,forgetStoredFile,checkBackup,renderBanners,writeBackup});
 Object.defineProperty(window.__APP__,'importReview',{get:()=>importReview});
 Object.defineProperty(window.__APP__,'bannerState',{get:()=>bannerState});
+Object.defineProperty(window.__APP__,'fieldTypes',{get:()=>fieldTypes});
+Object.defineProperty(window.__APP__,'treeView',{get:()=>treeView});
 window.__APP__.setReconnectHandle=h=>{reconnectHandle=h;bannerState.fileName=h&&h.name||'';renderBanners()};
 </script>
 <script>
@@ -2748,12 +2892,124 @@ function openShareDrawer(){
     });
   el('drawerSave').textContent='Export';
 }
+/* =====================================================================
+   Data Tools — standalone converters + custom field manager
+   ===================================================================== */
+function emptyBase(){return{people:[],roles:[],successors:[],boards:systemBoards(),rules:[],history:[],customFieldValues:{}}}
+async function reviewFromWorkbookBuffer(buf,name){
+  const sheets=await readXlsx(buf);
+  const texts=[];const notes=[];
+  sheets.forEach(sh=>{
+    if(!sh.rows.length)return;
+    const type=detectSheetType(sh.rows[0].map(normalizeHeader));
+    if(type&&type!=='FULL')texts.push({name:(name||'workbook.xlsx')+' ▸ '+sh.name,text:rowsToCsvText(sh.rows)});
+    else notes.push({file:(name||'workbook.xlsx')+' ▸ '+sh.name,severity:'INFO',problem:'Sheet skipped (view-only or unrecognized layout)',action:''});
+  });
+  const review=buildSheetImport(texts,{notes},emptyBase());
+  review.mode='convert';
+  review.outName=String(name||'workbook.xlsx').replace(/\.xlsx$/i,'')+'_planner.csv';
+  return review;
+}
+function pickConvertXlsx(){
+  const input=document.createElement('input');
+  input.type='file';input.accept='.xlsx';
+  input.onchange=async()=>{
+    const f=input.files[0];if(!f)return;
+    try{openImportReview(await reviewFromWorkbookBuffer(await f.arrayBuffer(),f.name))}
+    catch(e){notice('ERR','Could not read that Excel file: '+e.message)}
+  };
+  input.click();
+}
+function pickConvertCsv(){
+  const input=document.createElement('input');
+  input.type='file';input.accept='.csv,text/csv';
+  input.onchange=async()=>{
+    const f=input.files[0];if(!f)return;
+    const d=parseFullDbText(await f.text());
+    if(!d){notice('ERR','That CSV is not a full planner database (no recordType column). Simple sheets can be merged via Import & merge instead.');return}
+    downloadBytes(f.name.replace(/\.csv$/i,'')+'.xlsx',makeXlsx(workbookSheets(d)),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    notice('OK','Excel workbook downloaded — your open database was not touched.');
+  };
+  input.click();
+}
+function allExtraFieldNames(){
+  return[...new Set([...extraKeysFor(people),...extraKeysFor(roles),...extraKeysFor(successors),...Object.keys(fieldTypes)])].sort((a,b)=>a.localeCompare(b));
+}
+function allowedTypesFor(name){
+  const vals=[];
+  [...people,...roles,...successors].forEach(e=>{const v=(e._x||{})[name];if(String(v??'').trim()!=='')vals.push(String(v).trim())});
+  const number=vals.every(v=>/^-?[\d,]*\.?\d+$/.test(v));
+  const boolean=vals.every(v=>['true','false'].includes(v.toLowerCase()));
+  return{text:true,number:vals.length===0||number,boolean:vals.length===0||boolean,count:vals.length,samples:[...new Set(vals)].slice(0,3)};
+}
+function suggestedScope(name){
+  if(fieldTypes[name]&&fieldTypes[name].on)return fieldTypes[name].on;
+  const inP=extraKeysFor(people).includes(name),inR=extraKeysFor(roles).includes(name),inS=extraKeysFor(successors).includes(name);
+  const hits=[inP&&'person',inR&&'role',inS&&'candidate'].filter(Boolean);
+  return hits.length===1?hits[0]:'all';
+}
+function openDataTools(){
+  const fields=allExtraFieldNames();
+  const rows=fields.map(name=>{
+    const a=allowedTypesFor(name);
+    const cur=fieldTypeOf(name),on=suggestedScope(name);
+    const opt=(val,label,ok)=>`<option value="${val}" ${cur===val?'selected':''} ${ok?'':'disabled'}>${label}${ok?'':' — locked by existing data'}</option>`;
+    return `<tr><td><b>${esc(name)}</b><div class="hint">${a.count?plur(a.count,'value')+' · e.g. '+esc(a.samples.join(', ')):'no values yet'}</div></td>
+      <td><select class="ftType" data-field="${attr(name)}">${opt('text','Text',true)+opt('number','Number',a.number)+opt('boolean','True / False',a.boolean)}</select></td>
+      <td><select class="ftOn" data-field="${attr(name)}">${['all','person','role','candidate'].map(o=>`<option ${on===o?'selected':''}>${o}</option>`).join('')}</select></td></tr>`;
+  }).join('');
+  openDrawer('Data Tools','Converters work on files without touching your open database. Field types work like cell formats in Excel.',
+    `<div class="rule-section"><h3>File Converters</h3><div class="hint" style="margin-bottom:10px">HR can convert a file here and upload the result later — nothing is imported into what&rsquo;s currently open.</div>
+      <div class="choice-grid">
+        <div class="choice-card"><h3>Excel &rarr; Planner CSV</h3><div class="hint">Upload a workbook (People / Roles / Candidates / Boards tabs). You get the usual review and error report, then the converted CSV downloads.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="convertXlsx">Upload .xlsx&hellip;</button></div></div>
+        <div class="choice-card"><h3>Planner CSV &rarr; Excel</h3><div class="hint">Upload a planner CSV and download it as an Excel workbook with tabs.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="convertCsv">Upload .csv&hellip;</button></div></div>
+      </div></div>
+    <div class="rule-section"><h3>Custom Field Types</h3><div class="hint" style="margin-bottom:8px">A type is locked when the existing values don&rsquo;t fit it (letters can never become a Number) — and numeric-looking fields like postal codes may stay Text on purpose. Number fields unlock the greater/less-than rule operators.</div>
+      ${fields.length?`<div class="tablebox"><table class="table"><thead><tr><th>Field</th><th>Type</th><th>Applies to</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="hint">No custom fields yet — bulk-add some below or use “+ Add field” on any person/role.</div>'}
+    </div>
+    <div class="rule-section"><h3>Bulk Add Fields</h3><div class="hint" style="margin-bottom:8px">One field per line: <b>Name, type, applies to</b> — type is text / number / boolean, applies-to is person / role / candidate / all (both optional).</div>
+      <textarea id="bulkFields" placeholder="Bonus Target, number, person&#10;Remote OK, boolean, person&#10;Cost Center"></textarea>
+    </div>`,
+    ()=>saveDataTools(),'');
+  el('drawerSave').textContent='Save Field Changes';
+}
+function saveDataTools(){
+  const changes={};
+  document.querySelectorAll('#drawerBody .ftType').forEach(sel=>{changes[sel.dataset.field]={type:sel.value,on:'all'}});
+  document.querySelectorAll('#drawerBody .ftOn').forEach(sel=>{if(changes[sel.dataset.field])changes[sel.dataset.field].on=sel.value});
+  const skipped=[];const added=[];
+  v('bulkFields').split('\n').map(l=>l.trim()).filter(Boolean).forEach(line=>{
+    const parts=line.split(',').map(x=>x.trim());
+    const name=(parts[0]||'').replace(/["\r\n]/g,'').trim();
+    let type=(parts[1]||'text').toLowerCase(),on=(parts[2]||'all').toLowerCase();
+    if(!name)return;
+    if(CSV_HEADERS.includes(name)){skipped.push(`"${name}" is a built-in column`);return}
+    if(changes[name]){skipped.push(`"${name}" already exists`);return}
+    if(!FIELD_TYPES.includes(type))type='text';
+    if(!['all','person','role','candidate'].includes(on))on='all';
+    changes[name]={type,on};added.push(name);
+  });
+  for(const[name,def]of Object.entries(changes)){
+    const a=allowedTypesFor(name);
+    if((def.type==='number'&&!a.number)||(def.type==='boolean'&&!a.boolean)){notice('ERR',`"${name}" can’t be ${def.type} — existing values don’t fit. Fix the data first.`);return}
+  }
+  pushUndo('Update custom fields');
+  fieldTypes=changes;
+  log('Fields Updated',`${Object.keys(changes).length} custom field definition(s) saved${added.length?'; added: '+added.join(', '):''}`);
+  notice(skipped.length?'WARN':'OK',(added.length?plur(added.length,'field')+' added. ':'')+'Field settings saved.'+(skipped.length?' Skipped: '+skipped.join('; '):''));
+  closeDrawer();render();
+}
 Object.assign(ACTIONS,{
   exportXlsx:()=>{el('moreMenu').classList.remove('open');exportXlsxWorkbook()},
   shareExport:()=>{el('moreMenu').classList.remove('open');openShareDrawer()},
   importSheets:()=>{el('moreMenu').classList.remove('open');pickImportFiles()},
+  dataTools:()=>{el('moreMenu').classList.remove('open');openDataTools()},
+  convertXlsx:()=>pickConvertXlsx(),
+  convertCsv:()=>pickConvertCsv(),
 });
 Object.assign(window.__APP__,{makeXlsx,readXlsx,makeZip,unzip,workbookSheets,rowsToCsvText,exportXlsxWorkbook,parseFullDbText,fullDbToImportInputs,importFilesFlow,buildScopedData,openShareDrawer,chessGoTo,chessNav,chessRoleGroups,
+  openDataTools,saveDataTools,allowedTypesFor,fieldTypeOf,allExtraFieldNames,reviewFromWorkbookBuffer,convertedCsvFromReview,openImportReview,
+  treeZoomBy,fitTreeView,initTreeView,
   buildWorkbookBytes:()=>makeXlsx(workbookSheets()),
   importXlsxBuffer:async(buf,name)=>{const sheets=await readXlsx(buf);const texts=[];const notes=[];sheets.forEach(sh=>{if(!sh.rows.length)return;const type=detectSheetType(sh.rows[0].map(normalizeHeader));if(type&&type!=='FULL')texts.push({name:(name||'workbook.xlsx')+' ▸ '+sh.name,text:rowsToCsvText(sh.rows)});else notes.push({file:sh.name,severity:'INFO',problem:'Sheet skipped',action:''})});startSheetImport(texts,{notes})},
   importFullDbText:(name,text)=>{const inputs=fullDbToImportInputs(name,text);if(inputs)startSheetImport(inputs.texts,inputs.extras)},

@@ -124,7 +124,7 @@ function parseCsvRows(text) {
     const rows = parseCsvRows(await csvOf(page));
     const by = t => rows.filter(r => r.recordType === t).length;
     assertEq(by('PERSON'), 150); assertEq(by('ROLE'), 72); assertEq(by('RULE'), 5);
-    assertEq(by('BOARD'), 10); assertEq(by('SETTING'), 2); // customFieldValues + chessFields
+    assertEq(by('BOARD'), 10); assertEq(by('SETTING'), 3); // customFieldValues + chessFields + fieldTypes
     assert(by('SUCCESSOR') >= 280, 'successor rows');
   });
 
@@ -1552,7 +1552,142 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     17. SCREENSHOTS for the report
+     17. DATA TOOLS, TYPED FIELDS & ORG CANVAS
+     =================================================================== */
+  section('17. Data tools, typed fields, org canvas');
+  await test('org chart opens fitted + centered; wheel zooms; drag pans and suppresses the click', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.activeTab = 'MASTER'; __APP__.render(); });
+    assert(await page.locator('#treeViewport').count() === 1, 'viewport rendered');
+    const v0 = await page.evaluate(() => ({ ...__APP__.treeView }));
+    assert(v0 && v0.scale > 0 && v0.scale <= 1, 'initial fit scale: ' + v0.scale);
+    // wheel zoom in at viewport center
+    await page.evaluate(() => {
+      const vp = document.getElementById('treeViewport');
+      const r = vp.getBoundingClientRect();
+      vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, cancelable: true }));
+    });
+    const v1 = await page.evaluate(() => ({ ...__APP__.treeView }));
+    assert(v1.scale > v0.scale, 'wheel zoomed in');
+    // drag pan
+    await page.evaluate(() => {
+      const vp = document.getElementById('treeViewport');
+      const r = vp.getBoundingClientRect();
+      const opts = (x, y) => ({ button: 0, clientX: r.left + x, clientY: r.top + y, bubbles: true, cancelable: true, pointerId: 7 });
+      vp.dispatchEvent(new PointerEvent('pointerdown', opts(200, 200)));
+      vp.dispatchEvent(new PointerEvent('pointermove', opts(320, 260)));
+      vp.dispatchEvent(new PointerEvent('pointerup', opts(320, 260)));
+    });
+    const v2 = await page.evaluate(() => ({ ...__APP__.treeView }));
+    assertEq(Math.round(v2.x - v1.x), 120, 'panned right');
+    assertEq(Math.round(v2.y - v1.y), 60, 'panned down');
+    // a real click on a node (no drag) still opens the role
+    await page.waitForTimeout(120);
+    await page.click('#treeCanvas .node');
+    assert(await page.evaluate(() => document.getElementById('drawer').classList.contains('open')), 'node click opens the role drawer');
+    await clickAction(page, 'closeDrawer');
+    // zoom controls + fit
+    await page.click('[data-action="treeZoom"][data-delta="1"]');
+    const v3 = await page.evaluate(() => __APP__.treeView.scale);
+    assert(v3 > v2.scale, 'zoom button works');
+    await page.click('[data-action="treeReset"]');
+    const v4 = await page.evaluate(() => __APP__.treeView.scale);
+    assert(Math.abs(v4 - v0.scale) < 0.001, 'Fit returns to the fitted view');
+  });
+  await test('bulk-add typed fields via Data Tools; typed inputs appear; persists as SETTING', async () => {
+    await loadBase(page);
+    await clickAction(page, 'toggleMenu');
+    await page.click('#moreMenu [data-action="dataTools"]');
+    await typeInto(page, 'bulkFields', 'Bonus Target, number, person\nRemote OK, boolean, person\nPostal Code');
+    await page.click('#drawerSave');
+    const ft = await page.evaluate(() => __APP__.fieldTypes);
+    assertEq(ft['Bonus Target'].type, 'number'); assertEq(ft['Bonus Target'].on, 'person');
+    assertEq(ft['Remote OK'].type, 'boolean');
+    assertEq(ft['Postal Code'].type, 'text', 'defaults to text');
+    const rows = parseCsvRows(await csvOf(page));
+    const setting = rows.find(r => r.recordType === 'SETTING' && r.settingKey === 'fieldTypes');
+    assert(setting && setting.settingValue.includes('Bonus Target'), 'fieldTypes persisted in CSV');
+    // typed inputs in the person drawer
+    await page.evaluate(() => __APP__.openPersonDrawer('P001'));
+    const kinds = await page.evaluate(() => {
+      const get = k => [...document.querySelectorAll('#drawerBody .extraField')].find(x => x.dataset.extraKey === k);
+      return { bonus: get('Bonus Target')?.type, remote: get('Remote OK')?.tagName };
+    });
+    assertEq(kinds.bonus, 'number', 'number field renders a number input');
+    assertEq(kinds.remote, 'SELECT', 'boolean field renders a true/false select');
+    await page.evaluate(() => {
+      [...document.querySelectorAll('#drawerBody .extraField')].find(x => x.dataset.extraKey === 'Bonus Target').value = '60';
+    });
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.people.find(p => p.id === 'P001')._x['Bonus Target']), '60', 'typed value saved');
+  });
+  await test('greater/less-than eligibility rules work on numeric custom fields', async () => {
+    const r = await page.evaluate(() => {
+      const mk = (op, value) => ({ id: 'XN', name: 'xn', type: 'FIELD_RULE', scope: 'Candidate', field: 'Bonus Target', operator: op, value: JSON.stringify([{ field: 'Bonus Target', operator: op, value }]), severity: 'Block', message: 'xn', enabled: true });
+      const probe = { personId: 'P001', roleId: 'R-COO', readiness: 'Ready Now', source: 'Internal', candidateType: 'Successor', confidence: 'High' };
+      const run = rule => { __APP__.rules.push(rule); const e = __APP__.evaluateRules(probe); __APP__.rules.pop(); return e.blocks.length > 0; };
+      return {
+        passes: run(mk('greater than', '50')) === false,   // 60 > 50 → meets requirement
+        blocked: run(mk('greater than', '80')) === true,   // 60 > 80 fails → blocked
+        lessOk: run(mk('less than', '100')) === false,
+        nonNumeric: run({ id: 'XT', name: 'xt', type: 'FIELD_RULE', scope: 'Candidate', field: 'title', operator: 'greater than', value: JSON.stringify([{ field: 'title', operator: 'greater than', value: '5' }]), severity: 'Block', message: 'x', enabled: true }) === true, // text never satisfies numeric requirement
+        inDropdown: __APP__.openRuleDrawer(), // render field choices
+      };
+    });
+    assert(r.passes && r.blocked && r.lessOk && r.nonNumeric, 'numeric operator matrix: ' + JSON.stringify(r));
+    const hasCustom = await page.evaluate(() => [...document.querySelectorAll('.condField option')].some(o => o.value === 'Bonus Target'));
+    assert(hasCustom, 'custom field selectable in the rule builder');
+    await clickAction(page, 'closeDrawer');
+  });
+  await test('field types lock against non-fitting data (postal-code rule)', async () => {
+    await page.evaluate(() => { __APP__.people.find(p => p.id === 'P002')._x = { 'Shirt Size': 'L', 'Zip': '02134' }; });
+    const locks = await page.evaluate(() => ({ shirt: __APP__.allowedTypesFor('Shirt Size'), zip: __APP__.allowedTypesFor('Zip') }));
+    assert(locks.shirt.text && !locks.shirt.number && !locks.shirt.boolean, 'letters lock number/boolean');
+    assert(locks.zip.text && locks.zip.number, 'numeric-looking data may be Number or stay Text');
+    // the manager UI disables locked options
+    await page.evaluate(() => __APP__.openDataTools());
+    const disabled = await page.evaluate(() => {
+      const sel = [...document.querySelectorAll('.ftType')].find(s => s.dataset.field === 'Shirt Size');
+      return [...sel.options].filter(o => o.disabled).map(o => o.value).sort().join(',');
+    });
+    assertEq(disabled, 'boolean,number', 'locked options disabled in Data Tools');
+    await clickAction(page, 'closeDrawer');
+  });
+  await test('converter: Excel → planner CSV without touching the open database', async () => {
+    await loadBase(page);
+    const before = await csvOf(page);
+    const res = await page.evaluate(async () => {
+      const bytes = __APP__.buildWorkbookBytes();
+      const review = await __APP__.reviewFromWorkbookBuffer(bytes.buffer, 'convertme.xlsx');
+      return { mode: review.mode, out: review.outName, stats: review.stats, csv: __APP__.convertedCsvFromReview(review) };
+    });
+    assertEq(res.mode, 'convert');
+    assertEq(res.out, 'convertme_planner.csv');
+    assertEq(res.stats.errors, 0, 'clean conversion');
+    assertEq(res.stats.peopleAdded, 150, 'all people are new against an empty base');
+    assertEq(res.stats.rolesAdded, 72, 'all roles converted');
+    const conv = parseCsvRows(res.csv);
+    assertEq(conv.filter(r => r.recordType === 'PERSON').length, 150, 'converted CSV has all PERSON rows');
+    assertEq(await csvOf(page), before, 'open database untouched by conversion');
+    // the review drawer offers a download button instead of Apply
+    await page.evaluate(async () => __APP__.openImportReview(await __APP__.reviewFromWorkbookBuffer(__APP__.buildWorkbookBytes().buffer, 'x.xlsx')));
+    assertEq((await page.locator('#drawerSave').textContent()).trim(), 'Download converted CSV');
+    await page.click('[data-action="importCancel"]');
+  });
+  await test('converter: planner CSV → Excel workbook', async () => {
+    const ok = await page.evaluate(async () => {
+      const d = __APP__.parseFullDbText(__APP__.toCSV());
+      const bytes = __APP__.makeXlsx(__APP__.workbookSheets(d));
+      const sheets = await __APP__.readXlsx(bytes);
+      const people = sheets.find(s => s.name === 'People');
+      return { tabs: sheets.map(s => s.name), rows: people.rows.length };
+    });
+    ['People', 'Roles', 'Candidates', 'Boards'].forEach(t => assert(ok.tabs.includes(t), 'tab ' + t));
+    assertEq(ok.rows, 151, 'header + 150 people');
+  });
+
+  /* ===================================================================
+     18. SCREENSHOTS for the report
      =================================================================== */
   section('13. Screenshots');
   await test('capture UI screenshots', async () => {

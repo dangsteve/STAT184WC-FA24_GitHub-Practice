@@ -27,7 +27,10 @@ only — the CSV file is always the real database, so keep saving.
 
 ## The tabs
 
-- **Org Tree** — the reporting-line chart. Click any role to open it.
+- **Org Tree** — the reporting-line chart on a full-page canvas. It opens
+  fitted and centered; scroll to zoom, hold and drag to move around (like
+  Lucidchart), click any role to open it, and use the + / − / Fit buttons in
+  the corner.
 - **All Roles / your boards** — the working boards, grouped by level. Drag
   candidates from the Candidate Box onto roles; drag slate rows to re-prioritize.
   Tabs are yours to manage (the **+** tab or ⋯ → *Manage tabs*).
@@ -128,6 +131,19 @@ CSV and become available everywhere, including rule builders and filters.
   anything is applied. Deletions don't sync — remove records in the master.
 - **Starting fresh?** ⋯ → *Download starter template* gives you a small example
   CSV with one row of each type to copy from.
+- **Data Tools (developer)** — ⋯ → *Data Tools* holds the power features:
+  - **File converters**: upload an Excel workbook and download it as a planner
+    CSV (with the usual review + error report), or upload a planner CSV and
+    download an Excel workbook — without importing anything into what you have
+    open. Handy for prepping files before uploading them.
+  - **Custom field types**: give your own fields a type — Text, Number, or
+    True/False — like cell formats in Excel. Types drive the right input in the
+    forms, validation warnings on import, and unlock **greater/less-than** rule
+    operators on Number fields. A type is locked if the existing data doesn't
+    fit it (letters can't become a Number), and numeric-looking fields like
+    postal codes can deliberately stay Text.
+  - **Bulk add fields**: paste one field per line (`Name, type, applies to`)
+    to set up many columns at once.
 
 ## Safety
 
