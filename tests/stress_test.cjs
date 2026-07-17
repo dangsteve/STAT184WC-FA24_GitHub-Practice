@@ -124,7 +124,7 @@ function parseCsvRows(text) {
     const rows = parseCsvRows(await csvOf(page));
     const by = t => rows.filter(r => r.recordType === t).length;
     assertEq(by('PERSON'), 150); assertEq(by('ROLE'), 72); assertEq(by('RULE'), 5);
-    assertEq(by('BOARD'), 10); assertEq(by('SETTING'), 3); // customFieldValues + chessFields + fieldTypes
+    assertEq(by('BOARD'), 10); assertEq(by('SETTING'), 4); // customFieldValues + chessFields + fieldTypes + insightWidgets
     assert(by('SUCCESSOR') >= 280, 'successor rows');
   });
 
@@ -1687,7 +1687,131 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     18. SCREENSHOTS for the report
+     18. TYPE-AWARE RULES, CAPS, DASHBOARD WIDGETS
+     =================================================================== */
+  section('18. Typed rules, caps, dashboard widgets');
+  await test('rule builder: operators follow the field type; field/operator changes reset stale values', async () => {
+    await loadBase(page);
+    // register a numeric and boolean custom field
+    await page.evaluate(() => { __APP__.people[0]._x = { ...( __APP__.people[0]._x||{}), 'Bonus Target': '60' }; });
+    await clickAction(page, 'toggleMenu');
+    await page.click('#moreMenu [data-action="dataTools"]');
+    await typeInto(page, 'bulkFields', 'Remote OK, boolean, person');
+    await page.evaluate(() => { const s = [...document.querySelectorAll('.ftType')].find(x => x.dataset.field === 'Bonus Target'); if (s) s.value = 'number'; });
+    await page.click('#drawerSave');
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    const state = await page.evaluate(() => {
+      const row = document.querySelector('#conditionRows .condition-row');
+      const ops = sel => [...row.querySelectorAll('.condOperator option')].map(o => o.value);
+      const out = {};
+      out.textOps = ops(); // readiness = text field
+      // pick a value, then switch field -> operator + value must reset
+      row.querySelector('.condValueSelect').value = 'Ready Now';
+      row.querySelector('.condField').value = 'location';
+      row.querySelector('.condField').dispatchEvent(new Event('change', { bubbles: true }));
+      out.locationOps = ops();
+      out.opAfterFieldChange = row.querySelector('.condOperator').value;
+      out.valueAfterFieldChange = __APP__ && (row.querySelector('.condValueSelect')?.value || row.querySelector('.condValueText')?.value || '');
+      // operator change clears the value
+      row.querySelector('.condValueSelect').value = 'Boston';
+      row.querySelector('.condOperator').value = 'contains';
+      row.querySelector('.condOperator').dispatchEvent(new Event('change', { bubbles: true }));
+      out.valueAfterOpChange = row.querySelector('.condValueText').value;
+      // numeric field gets numeric ops + number input
+      row.querySelector('.condField').value = 'Bonus Target';
+      row.querySelector('.condField').dispatchEvent(new Event('change', { bubbles: true }));
+      out.numberOps = ops();
+      out.numberInput = row.querySelector('.condValueText')?.type;
+      // boolean field: only equal/not equal + true/false select
+      row.querySelector('.condField').value = 'Remote OK';
+      row.querySelector('.condField').dispatchEvent(new Event('change', { bubbles: true }));
+      out.boolOps = ops();
+      out.boolControl = [...row.querySelectorAll('.condValueSelect option')].map(o => o.value).join(',');
+      return out;
+    });
+    assert(!state.textOps.includes('greater than'), 'text fields have no greater-than');
+    assert(!state.locationOps.includes('greater than'), 'location (Boston) has no greater-than');
+    assertEq(state.opAfterFieldChange, 'equals', 'operator resets on field change');
+    assertEq(state.valueAfterFieldChange, '', 'value resets on field change');
+    assertEq(state.valueAfterOpChange, '', 'value clears on operator change');
+    assert(state.numberOps.includes('greater than') && state.numberOps.includes('less than'), 'number fields get numeric ops');
+    assertEq(state.numberInput, 'number', 'numeric value uses a number input');
+    assertEq(state.boolOps.filter(o => o).sort().join(','), 'equals,not equals', 'boolean fields: equal/not equal only');
+    assert(state.boolControl.includes('true') && state.boolControl.includes('false'), 'boolean value is a true/false select');
+    await clickAction(page, 'closeDrawer');
+  });
+  await test('oversized files are rejected with a clear error, database untouched', async () => {
+    await loadBase(page);
+    const before = await csvOf(page);
+    await page.evaluate(async MB => {
+      const big = new File([new Uint8Array((MB + 1) * 1024 * 1024)], 'huge.xlsx');
+      await __APP__.importFilesFlow([big]);
+    }, 20);
+    const rep = await page.evaluate(() => __APP__.importReview.report);
+    assert(rep.some(r => r.severity === 'ERROR' && r.problem.includes('limit is 20MB')), 'size cap error listed');
+    await page.click('[data-action="importCancel"]');
+    assertEq(await csvOf(page), before, 'database untouched');
+  });
+  await test('menu is lean; Import & merge and Share live inside Data Tools', async () => {
+    assertEq(await page.locator('#moreMenu [data-action="importSheets"]').count(), 0, 'import removed from menu');
+    assertEq(await page.locator('#moreMenu [data-action="shareExport"]').count(), 0, 'share removed from menu');
+    const label = await page.locator('#moreMenu [data-action="dataTools"]').textContent();
+    assert(!label.includes('developer'), 'renamed to plain Data Tools');
+    await page.evaluate(() => __APP__.openDataTools());
+    assert(await page.locator('#drawerBody [data-action="importSheets"]').count() === 1, 'Import & merge inside Data Tools');
+    assert(await page.locator('#drawerBody [data-action="shareExport"]').count() === 1, 'Share inside Data Tools');
+    await clickAction(page, 'closeDrawer');
+  });
+  await test('dashboard widgets: count/percent/bar/average compute correctly and persist', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.people.forEach((p, i) => { p._x = { ...(p._x||{}), Score: String(i % 4) }; }); });
+    await page.evaluate(() => { const ft = __APP__.fieldTypes; ft.Score = { type: 'number', on: 'person' }; });
+    // KPI count with filter via drawer UI
+    await page.evaluate(() => __APP__.openWidgetDrawer());
+    await setSelect(page, 'wSource', 'roles');
+    await setSelect(page, 'wfField', 'risk');
+    await page.evaluate(() => { document.getElementById('wfOp').value = 'equals'; document.getElementById('wfValue').value = 'High'; });
+    await page.click('#drawerSave');
+    const expHigh = await page.evaluate(() => __APP__.roles.filter(r => r.risk === 'High').length);
+    const w1 = await page.evaluate(() => __APP__.computeWidget(__APP__.insightWidgets[0]));
+    assertEq(w1.big, String(expHigh), 'filtered count matches');
+    // bar breakdown
+    await page.evaluate(() => __APP__.openWidgetDrawer());
+    await setSelect(page, 'wKind', 'bar');
+    await page.evaluate(() => { document.getElementById('wField').value = 'department'; });
+    await page.click('#drawerSave');
+    const w2 = await page.evaluate(() => __APP__.computeWidget(__APP__.insightWidgets[1]));
+    const expDept = await page.evaluate(() => { const g = {}; __APP__.roles.forEach(r => { const k = r.department || '(blank)'; g[k] = (g[k] || 0) + 1; }); return Object.entries(g).sort((a, b) => b[1] - a[1])[0]; });
+    assertEq(w2.bars[0][0], expDept[0], 'top group right'); assertEq(w2.bars[0][1], expDept[1], 'top count right');
+    // average of numeric custom field
+    await page.evaluate(() => __APP__.openWidgetDrawer());
+    await setSelect(page, 'wSource', 'people');
+    await setSelect(page, 'wKind', 'avg');
+    await page.evaluate(() => { document.getElementById('wField').value = 'Score'; });
+    await page.click('#drawerSave');
+    const w3 = await page.evaluate(() => __APP__.computeWidget(__APP__.insightWidgets[2]));
+    const expAvg = await page.evaluate(() => { const n = __APP__.people.map(p => parseFloat(p._x.Score)); return Math.round(n.reduce((a, b) => a + b, 0) / n.length * 100) / 100; });
+    assertEq(w3.big, String(expAvg), 'average correct');
+    // rendered on Insights + persists through round-trip
+    await page.evaluate(() => { __APP__.activeTab = 'INSIGHTS'; __APP__.render(); });
+    assertEq(await page.locator('[data-action="removeWidget"]').count(), 3, 'three widget cards rendered');
+    const csv = await csvOf(page);
+    await loadBase(page, csv);
+    assertEq(await page.evaluate(() => __APP__.insightWidgets.length), 3, 'widgets survive CSV round-trip');
+    // remove works; cap enforced
+    await page.evaluate(() => { __APP__.activeTab = 'INSIGHTS'; __APP__.render(); });
+    await page.click('[data-action="removeWidget"]');
+    assertEq(await page.evaluate(() => __APP__.insightWidgets.length), 2, 'widget removed');
+    await page.evaluate(() => { while (__APP__.insightWidgets.length < 8) __APP__.insightWidgets.push({ id: 'W' + __APP__.insightWidgets.length, title: 'x', source: 'roles', kind: 'count', field: '', filter: null }); });
+    await page.evaluate(() => { __APP__.openWidgetDrawer(); });
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.insightWidgets.length), 8, 'cap of 8 enforced');
+    assertEq((await lastMsg(page)).type, 'ERR', 'cap message shown');
+    await clickAction(page, 'closeDrawer');
+  });
+
+  /* ===================================================================
+     19. SCREENSHOTS for the report
      =================================================================== */
   section('13. Screenshots');
   await test('capture UI screenshots', async () => {

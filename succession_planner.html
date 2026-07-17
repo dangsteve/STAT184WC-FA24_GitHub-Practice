@@ -342,13 +342,11 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
         <button class="btn btn-quiet" data-action="toggleMenu" title="More actions">&#8943;</button>
         <div class="menu" id="moreMenu">
           <button data-action="manageTabs">Manage tabs&hellip;</button>
-          <button data-action="importSheets">Import &amp; merge (CSV / Excel)&hellip;</button>
           <button data-action="exportXlsx">Export Excel workbook (.xlsx)</button>
-          <button data-action="shareExport">Share / export a board&hellip;</button>
           <button data-action="downloadTemplate">Download starter template</button>
-          <div class="sep"></div>
-          <button data-action="dataTools">Data Tools (developer)&hellip;</button>
           <button data-action="downloadSheetTemplates">Download simple sheet templates</button>
+          <div class="sep"></div>
+          <button data-action="dataTools">Data Tools&hellip;</button>
           <div class="sep"></div>
           <button data-action="resetOrg">Reset org changes to import</button>
           <button class="danger" data-action="clearAll">Clear all data&hellip;</button>
@@ -437,13 +435,14 @@ const CHESS_PIECES=[['♛','Queen'],['♜','Rook'],['♝','Bishop'],['♞','Knig
 const BACKUP_KEY='succession_planner_backup_v1';
 const LIST_CAP=400;   // max table rows rendered at once
 const PIECE_CAP=200;  // max candidate cards rendered at once
+const MAX_XLSX_MB=20, MAX_CSV_MB=50, MAX_SHEET_ROWS=25000, MAX_WIDGETS=8;
 
 let boards=systemBoards(),roles=[],people=[],successors=[],rules=[],history=[],messages=[];
 let fileHandle=null,selectedPersonId='',backRoleId='',undoStack=[],importBaseline=null,currentDrawerPersonId='',customFieldValues={};
 let activeTab='MASTER',dirty=false,backupTimer=null,automationDepth=0;
 let chess=null,chessSessionFields=null,chessDefaultFields=null,lastInferred=null;
 let bannerState={backup:null,fileName:''},reconnectHandle=null,importReview=null;
-let fieldTypes={},treeView=null,treeClickSuppressed=false;
+let fieldTypes={},treeView=null,treeClickSuppressed=false,insightWidgets=[];
 
 function systemBoards(){return SYSTEM_TABS.map(t=>({id:t.id,name:t.name}))}
 function uid(p){return p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7)}
@@ -554,8 +553,8 @@ async function reconnectStoredFile(){
 function forgetStoredFile(){reconnectHandle=null;bannerState.fileName='';idbDel('fileHandle');renderBanners();setStatus('Forgot the remembered file')}
 
 /* ---------- undo & baseline ---------- */
-function takeSnapshot(){return{roles:deepClone(roles),people:deepClone(people),successors:deepClone(successors),rules:deepClone(rules),history:deepClone(history),boards:deepClone(boards),customFieldValues:deepClone(customFieldValues),activeTab}}
-function restoreSnapshot(s){roles=s.roles;people=s.people;successors=s.successors;rules=s.rules;history=s.history;boards=s.boards;customFieldValues=s.customFieldValues||{};activeTab=s.activeTab||'MASTER';render()}
+function takeSnapshot(){return{roles:deepClone(roles),people:deepClone(people),successors:deepClone(successors),rules:deepClone(rules),history:deepClone(history),boards:deepClone(boards),customFieldValues:deepClone(customFieldValues),fieldTypes:deepClone(fieldTypes),insightWidgets:deepClone(insightWidgets),activeTab}}
+function restoreSnapshot(s){roles=s.roles;people=s.people;successors=s.successors;rules=s.rules;history=s.history;boards=s.boards;customFieldValues=s.customFieldValues||{};fieldTypes=s.fieldTypes||fieldTypes;insightWidgets=s.insightWidgets||insightWidgets;activeTab=s.activeTab||'MASTER';render()}
 function pushUndo(action='Change'){undoStack.push({action,snapshot:takeSnapshot()});if(undoStack.length>40)undoStack.shift();markDirty()}
 function undoLastAction(){const last=undoStack.pop();if(!last){notice('WARN','Nothing to undo.');return}restoreSnapshot(last.snapshot);markDirty();notice('OK','Undid: '+last.action)}
 function captureImportBaseline(){importBaseline={roles:deepClone(roles),successors:deepClone(successors),boards:deepClone(boards)}}
@@ -706,6 +705,7 @@ function parseCSV(text){
 function csvEsc(v){const s=String(v??'');return /[",\n\r]/.test(s)?'"'+s.replaceAll('"','""')+'"':s}
 
 function loadCSV(text){
+  if(String(text||'').length>MAX_CSV_MB*1024*1024){notice('ERR',`This CSV is over ${MAX_CSV_MB}MB — split it or trim old history rows before opening.`);return false}
   const rows=parseCSV(String(text||''));
   if(rows.length<2){notice('ERR','CSV appears empty or invalid — nothing was loaded.');return false}
   const headers=rows[0].map(h=>h.trim());
@@ -713,7 +713,7 @@ function loadCSV(text){
   // columns this app doesn't know yet are preserved on each record and written back on save
   const extraCols=headers.filter(h=>h&&!CSV_HEADERS.includes(h));
   const grabExtras=o=>extraCols.length?Object.fromEntries(extraCols.map(h=>[h,o[h]||''])):undefined;
-  boards=systemBoards();roles=[];people=[];successors=[];rules=[];history=[];messages=[];customFieldValues={};chessDefaultFields=null;fieldTypes={};treeView=null;
+  boards=systemBoards();roles=[];people=[];successors=[];rules=[];history=[];messages=[];customFieldValues={};chessDefaultFields=null;fieldTypes={};treeView=null;insightWidgets=[];
   rows.slice(1).forEach(row=>{
     const o={};headers.forEach((h,i)=>o[h]=row[i]||'');
     if(!Object.values(o).some(x=>String(x).trim()))return;
@@ -735,6 +735,7 @@ function loadCSV(text){
     if(o.recordType==='SETTING'&&o.settingKey==='customFieldValues'){try{customFieldValues=JSON.parse(o.settingValue||'{}')||{}}catch(e){customFieldValues={}}}
     if(o.recordType==='SETTING'&&o.settingKey==='chessFields'){try{const f=JSON.parse(o.settingValue||'null');if(Array.isArray(f))chessDefaultFields=f}catch(e){}}
     if(o.recordType==='SETTING'&&o.settingKey==='fieldTypes'){try{const f=JSON.parse(o.settingValue||'{}');if(f&&typeof f==='object')fieldTypes=f}catch(e){}}
+    if(o.recordType==='SETTING'&&o.settingKey==='insightWidgets'){try{const f=JSON.parse(o.settingValue||'[]');if(Array.isArray(f))insightWidgets=f.slice(0,MAX_WIDGETS)}catch(e){}}
   });
   consolidateDuplicateData(true);
   validateDataLinks();
@@ -767,6 +768,7 @@ function toCSV(data){
   put({recordType:'SETTING',settingKey:'customFieldValues',settingValue:JSON.stringify(d.customFieldValues||{})});
   put({recordType:'SETTING',settingKey:'chessFields',settingValue:JSON.stringify(d.chessFields||chessDefaultFields||CHESS_DEFAULT_FIELDS)});
   put({recordType:'SETTING',settingKey:'fieldTypes',settingValue:JSON.stringify(d.fieldTypes||fieldTypes||{})});
+  put({recordType:'SETTING',settingKey:'insightWidgets',settingValue:JSON.stringify(d.insightWidgets||insightWidgets||[])});
   return rows.join('\n');
 }
 function downloadTemplate(){
@@ -1385,7 +1387,8 @@ function renderHistoryPage(){
 
 /* ---------- insights ---------- */
 function renderInsights(){
-  setView('Insights','Bench strength at a glance. The filters above apply to these numbers.');
+  setView('Insights','Bench strength at a glance. The filter bar applies to the standard panels below; your own dashboard widgets always show all data.',
+    insightWidgets.length<MAX_WIDGETS?`<button class="btn btn-green btn-sm" data-action="addWidget">+ Add widget</button>`:'');
   const fr=filteredRoles();
   const frIds=new Set(fr.map(r=>r.id));
   const ss=successors.filter(s=>frIds.has(s.roleId));
@@ -1397,7 +1400,7 @@ function renderInsights(){
   const highRisk=fr.filter(r=>['high','critical'].includes(norm(r.risk)));
   const riskGaps=highRisk.filter(r=>!readySet.has(r.id));
   const gaps=fr.filter(r=>!slateSet.has(r.id));
-  if(!fr.length){el('mainView').innerHTML=emptyState('No roles to analyze','Open a CSV or clear the filters.');return}
+  if(!fr.length){el('mainView').innerHTML=renderWidgetCards()+emptyState('No roles to analyze','Open a CSV or clear the filters.');return}
 
   const kpis=`<div class="kpis">
     <div class="kpi"><b>${fr.length}</b><small>Roles in view</small></div>
@@ -1420,7 +1423,7 @@ function renderInsights(){
 
   const gapTable=list=>list.slice(0,30).map(r=>`<tr class="row-click" data-action="openRole" data-role-id="${attr(r.id)}"><td><b>${esc(r.title)}</b><div style="color:var(--muted);font-size:11px">${esc(r.id)}</div></td><td>${esc(r.level||'')}</td><td>${esc(r.department||'')}</td><td>${riskBadge(r.risk)}</td><td>${isRoleVacant(r)?'<span class="badge red">VACANT</span>':esc(personName(r.incumbentPersonId,r.incumbentName))}</td></tr>`).join('');
 
-  el('mainView').innerHTML=kpis+
+  el('mainView').innerHTML=renderWidgetCards()+kpis+
     `<div class="insight-grid">
       <div class="insight-card"><h3>Bench coverage by department</h3>${deptRows||'<div class="hint">No data.</div>'}</div>
       <div class="insight-card"><h3>Candidate readiness mix</h3>${readyRows||'<div class="hint">No slate rows.</div>'}</div>
@@ -1698,8 +1701,7 @@ function checkboxId(){return 'cb-'+Math.random().toString(36).slice(2,9)}
 function valueSelectForField(field,selected=''){
   let vals=valuesForField(field,[]);
   if(selected&&!vals.includes(selected))vals.unshift(selected);
-  if(!vals.length)vals=[''];
-  return `<select class="condValueSelect">${vals.map(x=>`<option value="${attr(x)}" ${x===selected?'selected':''}>${esc(x||'-- no values yet --')}</option>`).join('')}<option value="__ADD__">+ Add value&hellip;</option></select>`;
+  return `<select class="condValueSelect"><option value=""></option>${vals.map(x=>`<option value="${attr(x)}" ${x===selected?'selected':''}>${esc(x)}</option>`).join('')}<option value="__ADD__">+ Add value&hellip;</option></select>`;
 }
 function valueTextForField(field,selected=''){
   const listId='dl-'+checkboxId();
@@ -1713,10 +1715,35 @@ function valueCheckboxesForField(field,selected=''){
   const boxes=vals.map(x=>{const bid=checkboxId();return `<label for="${bid}"><input id="${bid}" type="checkbox" class="condValCheck" value="${attr(x)}" ${sel.includes(x)?'checked':''}>${esc(x||'-- no values yet --')}</label>`}).join('');
   return `<div class="value-picker"><label class="select-all" for="${allId}"><input id="${allId}" type="checkbox" class="selAll" ${vals.length&&vals.every(x=>sel.includes(x))?'checked':''}>Select all</label>${boxes}<button type="button" class="btn btn-quiet btn-sm" data-action="addCheckboxValue" style="margin-top:6px">+ Add value</button></div>`;
 }
+function ruleFieldType(field){return CANDIDATE_FIELDS.includes(field)?'text':fieldTypeOf(field)}
+function operatorChoicesFor(t){
+  if(t==='number')return[['equals','equal to'],['not equals','not equal to'],['greater than','greater than'],['less than','less than'],['list','any of (list)']];
+  if(t==='boolean')return[['equals','equal to'],['not equals','not equal to']];
+  return[['equals','equal to'],['not equals','not equal to'],['contains','contains'],['not contains','does not contain'],['list','any of (list)']];
+}
+function operatorSelectHtml(field,selected){
+  const choices=[...operatorChoicesFor(ruleFieldType(field))];
+  if(selected&&!choices.some(([val])=>val===selected))choices.unshift([selected,selected]); // legacy rules keep their operator visible
+  return `<select class="condOperator">${choices.map(([val,label])=>`<option value="${attr(val)}" ${val===selected?'selected':''}>${esc(label)}</option>`).join('')}</select>`;
+}
 function valueControlForCondition(field,op,selected=''){
+  const t=ruleFieldType(field);
   if(op==='list')return valueCheckboxesForField(field,selected);
+  if(t==='boolean')return `<select class="condValueSelect"><option value=""></option><option ${norm(selected)==='true'?'selected':''}>true</option><option ${norm(selected)==='false'?'selected':''}>false</option></select>`;
+  if(t==='number')return `<input type="number" step="any" class="condValueText" value="${attr(selectedValues(selected)[0]||selected||'')}" placeholder="Number&hellip;">`;
   if(TEXT_OPERATORS.includes(op))return valueTextForField(field,selected);
   return valueSelectForField(field,selectedValues(selected)[0]||selected);
+}
+/* changing the field resets operator + value; changing the operator clears the value —
+   otherwise a stale value (e.g. "Boston") could silently be saved onto another field */
+function resetConditionRow(fieldSel){
+  const row=fieldSel.closest('.condition-row');
+  row.querySelector('.condOperator').outerHTML=operatorSelectHtml(fieldSel.value,'equals');
+  row.querySelector('.condValueBox').innerHTML=valueControlForCondition(fieldSel.value,'equals','');
+}
+function resetConditionValue(opSel){
+  const row=opSel.closest('.condition-row');
+  row.querySelector('.condValueBox').innerHTML=valueControlForCondition(row.querySelector('.condField').value,opSel.value,'');
 }
 function updateConditionValue(elm){
   const row=elm.closest('.condition-row');
@@ -1727,7 +1754,8 @@ function updateConditionValue(elm){
 function getConditionValues(row){
   const op=row.querySelector('.condOperator')?.value||'equals';
   if(op==='list')return[...row.querySelectorAll('.condValCheck')].filter(x=>x.checked).map(x=>x.value).join('|');
-  if(TEXT_OPERATORS.includes(op))return row.querySelector('.condValueText')?.value||'';
+  const txt=row.querySelector('.condValueText');
+  if(txt)return txt.value;
   return row.querySelector('.condValueSelect')?.value||'';
 }
 function toggleAllCondValues(box){box.closest('.value-picker').querySelectorAll('.condValCheck').forEach(cb=>cb.checked=box.checked)}
@@ -1753,10 +1781,9 @@ function handleRuleValueSelect(sel){
 }
 function conditionRowHtml(c={field:'readiness',operator:'equals',value:'Ready Now'}){
   const op=c.operator==='in list'?'list':(c.operator||'equals');
-  const opOpt=(val,label)=>`<option value="${val}" ${op===val?'selected':''}>${label}</option>`;
   return `<div class="condition-row">
     <div><label>Candidate Field</label><select class="condField">${fieldOptions(c.field)}</select></div>
-    <div><label>Operator</label><select class="condOperator">${opOpt('equals','equal to')+opOpt('not equals','not equal to')+opOpt('contains','contains')+opOpt('not contains','does not contain')+opOpt('greater than','greater than (number)')+opOpt('less than','less than (number)')+opOpt('list','any of (list)')}</select></div>
+    <div><label>Operator</label>${operatorSelectHtml(c.field,op)}</div>
     <div><label>Value</label><div class="condValueBox">${valueControlForCondition(c.field,op,c.value||'')}</div></div>
     <button class="btn btn-danger btn-sm" type="button" data-action="removeParent" data-target=".condition-row" style="align-self:end">Remove</button>
   </div>`;
@@ -2235,7 +2262,8 @@ document.addEventListener('change',e=>{
   if(t.dataset.change==='customSelect')return handleCustomSelect(t);
   if(t.dataset.change==='ruleToggle')return toggleRule(t.dataset.ruleId,t.checked);
   if(t.dataset.change==='chessField')return chessToggleField(t.dataset.field);
-  if(t.classList.contains('condField')||t.classList.contains('condOperator'))return updateConditionValue(t);
+  if(t.classList.contains('condField'))return resetConditionRow(t);
+  if(t.classList.contains('condOperator'))return resetConditionValue(t);
   if(t.classList.contains('condValueSelect'))return handleRuleValueSelect(t);
   if(t.classList.contains('selAll'))return toggleAllCondValues(t);
   if(t.id==='chessRoleSwitch')return chessGoTo(t.value);
@@ -2657,6 +2685,7 @@ Object.defineProperty(window.__APP__,'importReview',{get:()=>importReview});
 Object.defineProperty(window.__APP__,'bannerState',{get:()=>bannerState});
 Object.defineProperty(window.__APP__,'fieldTypes',{get:()=>fieldTypes});
 Object.defineProperty(window.__APP__,'treeView',{get:()=>treeView});
+Object.defineProperty(window.__APP__,'insightWidgets',{get:()=>insightWidgets});
 window.__APP__.setReconnectHandle=h=>{reconnectHandle=h;bannerState.fileName=h&&h.name||'';renderBanners()};
 </script>
 <script>
@@ -2829,12 +2858,17 @@ async function importFilesFlow(files){
   const texts=[];const extras={rules:[],boards:[],history:[],customFieldValues:{},notes:[]};
   let any=false;
   for(const f of files){
+    if(f.size>(/\.xlsx$/i.test(f.name)?MAX_XLSX_MB:MAX_CSV_MB)*1024*1024){
+      extras.notes.push({file:f.name,severity:'ERROR',problem:`File is ${(f.size/1024/1024).toFixed(1)}MB — the limit is ${/\.xlsx$/i.test(f.name)?MAX_XLSX_MB:MAX_CSV_MB}MB`,action:'File skipped — split it, or convert to CSV in Data Tools first'});
+      any=true;continue;
+    }
     if(/\.xlsx$/i.test(f.name)){
       let sheets;
       try{sheets=await readXlsx(await f.arrayBuffer())}
       catch(e){extras.notes.push({file:f.name,severity:'ERROR',problem:'Could not read the Excel file: '+e.message,action:'File skipped'});any=true;continue}
       for(const sh of sheets){
         if(!sh.rows.length)continue;
+        if(sh.rows.length>MAX_SHEET_ROWS){extras.notes.push({file:f.name+' ▸ '+sh.name,severity:'ERROR',problem:`Sheet has ${sh.rows.length.toLocaleString()} rows — the limit is ${MAX_SHEET_ROWS.toLocaleString()}`,action:'Sheet skipped — split it into smaller files'});any=true;continue}
         const type=detectSheetType(sh.rows[0].map(normalizeHeader));
         if(type&&type!=='FULL'){texts.push({name:f.name+' ▸ '+sh.name,text:rowsToCsvText(sh.rows)});any=true}
         else extras.notes.push({file:f.name+' ▸ '+sh.name,severity:'INFO',problem:'Sheet skipped (view-only or unrecognized layout)',action:''});
@@ -2901,6 +2935,7 @@ async function reviewFromWorkbookBuffer(buf,name){
   const texts=[];const notes=[];
   sheets.forEach(sh=>{
     if(!sh.rows.length)return;
+    if(sh.rows.length>MAX_SHEET_ROWS){notes.push({file:(name||'workbook.xlsx')+' ▸ '+sh.name,severity:'ERROR',problem:`Sheet has ${sh.rows.length.toLocaleString()} rows — the limit is ${MAX_SHEET_ROWS.toLocaleString()}`,action:'Sheet skipped — split it into smaller files'});return}
     const type=detectSheetType(sh.rows[0].map(normalizeHeader));
     if(type&&type!=='FULL')texts.push({name:(name||'workbook.xlsx')+' ▸ '+sh.name,text:rowsToCsvText(sh.rows)});
     else notes.push({file:(name||'workbook.xlsx')+' ▸ '+sh.name,severity:'INFO',problem:'Sheet skipped (view-only or unrecognized layout)',action:''});
@@ -2958,8 +2993,13 @@ function openDataTools(){
       <td><select class="ftType" data-field="${attr(name)}">${opt('text','Text',true)+opt('number','Number',a.number)+opt('boolean','True / False',a.boolean)}</select></td>
       <td><select class="ftOn" data-field="${attr(name)}">${['all','person','role','candidate'].map(o=>`<option ${on===o?'selected':''}>${o}</option>`).join('')}</select></td></tr>`;
   }).join('');
-  openDrawer('Data Tools','Converters work on files without touching your open database. Field types work like cell formats in Excel.',
-    `<div class="rule-section"><h3>File Converters</h3><div class="hint" style="margin-bottom:10px">HR can convert a file here and upload the result later — nothing is imported into what&rsquo;s currently open.</div>
+  openDrawer('Data Tools','Everything for moving data in and out, plus custom field types.',
+    `<div class="rule-section"><h3>Import &amp; Share</h3>
+      <div class="choice-grid">
+        <div class="choice-card"><h3>Import &amp; merge</h3><div class="hint">Bring in simple sheets, Excel workbooks or returned planner CSVs. Everything goes through a review with an error report before anything is applied.</div><div style="margin-top:10px"><button class="btn btn-primary" data-action="importSheets">Import &amp; merge (CSV / Excel)&hellip;</button></div></div>
+        <div class="choice-card"><h3>Share / export a board</h3><div class="hint">Export one board (or everything) as a planner CSV or Excel workbook to hand to someone else, then merge their changes back.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="shareExport">Share / export&hellip;</button></div></div>
+      </div></div>
+    <div class="rule-section"><h3>File Converters</h3><div class="hint" style="margin-bottom:10px">HR can convert a file here and upload the result later — nothing is imported into what&rsquo;s currently open.</div>
       <div class="choice-grid">
         <div class="choice-card"><h3>Excel &rarr; Planner CSV</h3><div class="hint">Upload a workbook (People / Roles / Candidates / Boards tabs). You get the usual review and error report, then the converted CSV downloads.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="convertXlsx">Upload .xlsx&hellip;</button></div></div>
         <div class="choice-card"><h3>Planner CSV &rarr; Excel</h3><div class="hint">Upload a planner CSV and download it as an Excel workbook with tabs.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="convertCsv">Upload .csv&hellip;</button></div></div>
@@ -2999,6 +3039,138 @@ function saveDataTools(){
   notice(skipped.length?'WARN':'OK',(added.length?plur(added.length,'field')+' added. ':'')+'Field settings saved.'+(skipped.length?' Skipped: '+skipped.join('; '):''));
   closeDrawer();render();
 }
+/* =====================================================================
+   Insights dashboard widgets (max MAX_WIDGETS, saved in the CSV)
+   ===================================================================== */
+function widgetRecords(source){return source==='roles'?roles:source==='people'?people:successors}
+function recVal(source,rec,f){
+  if(source==='candidates'){
+    if(f in rec)return rec[f];
+    return getFieldValue(person(rec.personId),rec,f);
+  }
+  if(f in rec)return rec[f];
+  return (rec._x||{})[f]??'';
+}
+function widgetFieldType(source,field){
+  if(source==='candidates'&&['approved','autoMoveQueued'].includes(field))return 'boolean';
+  if(source==='roles'&&field==='sortOrder')return 'number';
+  if(source==='candidates'&&field==='ranking')return 'number';
+  return fieldTypes[field]?fieldTypeOf(field):'text';
+}
+function widgetFieldChoices(source){
+  if(source==='roles')return[['level','Level'],['department','Department'],['risk','Risk'],['criticality','Criticality'],['status','Status'],['boardId','Board'],['owner','Owner'],...extraKeysWithRegistry(roles,'role').map(k=>[k,k])];
+  if(source==='people')return[['department','Department'],['location','Location'],['jobLevel','Job Level'],['readiness','Readiness'],['source','Source'],['candidateType','Candidate Type'],['performance','Performance'],['potential','Potential'],['retentionRisk','Retention Risk'],['mobility','Mobility'],['confidence','Confidence'],...extraKeysWithRegistry(people,'person').map(k=>[k,k])];
+  return[['readiness','Readiness'],['candidateType','Candidate Type'],['source','Source'],['confidence','Confidence'],['approved','Approved'],['autoMoveQueued','Queued for auto move'],...extraKeysWithRegistry(successors,'candidate').map(k=>[k,k])];
+}
+function widgetNumericChoices(source){
+  const base=source==='roles'?[['sortOrder','Sort Order']]:source==='candidates'?[['ranking','Ranking']]:[];
+  const scope={roles:'role',people:'person',candidates:'candidate'}[source];
+  const typed=Object.entries(fieldTypes).filter(([k,def])=>def&&def.type==='number'&&(!def.on||def.on==='all'||def.on===scope)).map(([k])=>[k,k]);
+  return[...base,...typed];
+}
+function computeWidget(w){
+  const all=widgetRecords(w.source);
+  const list=all.filter(rec=>{
+    if(!w.filter||!w.filter.field)return true;
+    return compare(recVal(w.source,rec,w.filter.field),w.filter.operator||'equals',w.filter.value);
+  });
+  if(w.kind==='count')return{big:list.length.toLocaleString()};
+  if(w.kind==='percent')return{big:pct(list.length,all.length)+'%',sub:`${list.length} of ${all.length}`};
+  if(w.kind==='sum'||w.kind==='avg'){
+    const nums=list.map(r=>parseFloat(String(recVal(w.source,r,w.field)??'').replace(/,/g,''))).filter(n=>!isNaN(n));
+    const sum=nums.reduce((a,b)=>a+b,0);
+    const val=w.kind==='sum'?sum:(nums.length?sum/nums.length:0);
+    return{big:(Math.round(val*100)/100).toLocaleString(),sub:`${w.kind==='sum'?'sum':'average'} of ${w.field} · ${nums.length} value${nums.length===1?'':'s'}`};
+  }
+  const groups={};
+  list.forEach(r=>{const k=String(recVal(w.source,r,w.field)??'')||'(blank)';groups[k]=(groups[k]||0)+1});
+  const bars=Object.entries(groups).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  return{bars,max:Math.max(1,...bars.map(b=>b[1]))};
+}
+function widgetDesc(w){
+  const src={roles:'roles',people:'people',candidates:'slate rows'}[w.source];
+  let s=w.kind==='bar'?`${src} by ${w.field}`:{count:'count of '+src,percent:'% of '+src,sum:`sum of ${w.field} across ${src}`,avg:`average ${w.field} across ${src}`}[w.kind];
+  if(w.filter&&w.filter.field)s+=` where ${w.filter.field} ${w.filter.operator} ${w.filter.value}`;
+  return s+' · all data';
+}
+function renderWidgetCards(){
+  if(!insightWidgets.length)return '';
+  const cards=insightWidgets.map(w=>{
+    const c=computeWidget(w);
+    const body=c.bars
+      ?(c.bars.map(([k,n])=>`<div class="barrow"><span class="lbl" title="${attr(k)}">${esc(k)}</span><span class="track"><span class="fill" style="width:${pct(n,c.max)}%"></span></span><span class="val">${n}</span></div>`).join('')||'<div class="hint">No data.</div>')
+      :`<b style="font-size:26px;line-height:1.2">${esc(c.big)}</b>${c.sub?`<div class="hint">${esc(c.sub)}</div>`:''}`;
+    return `<div class="insight-card"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px"><h3 style="margin:0">${esc(w.title)}</h3><button class="icon-btn bad" data-action="removeWidget" data-widget-id="${attr(w.id)}" title="Remove this widget">&#10005;</button></div>${body}<div class="hint" style="margin-top:8px">${esc(widgetDesc(w))}</div></div>`;
+  }).join('');
+  return `<div class="side-title" style="margin:2px 0 8px">My Dashboard</div><div class="insight-grid" style="margin-bottom:18px">${cards}</div>`;
+}
+function updateWidgetFilterControls(){
+  const source=v('wSource'),f=v('wfField');
+  const opBox=el('wfOpBox'),valBox=el('wfValueBox');
+  if(!opBox||!valBox)return;
+  if(!f){opBox.innerHTML='<select id="wfOp" disabled><option></option></select>';valBox.innerHTML='<input id="wfValue" disabled placeholder="— no filter —">';return}
+  const t=widgetFieldType(source,f);
+  const ops=operatorChoicesFor(t).filter(([val])=>val!=='list');
+  opBox.innerHTML=`<select id="wfOp">${ops.map(([val,label])=>`<option value="${attr(val)}">${esc(label)}</option>`).join('')}</select>`;
+  if(t==='boolean')valBox.innerHTML='<select id="wfValue"><option>true</option><option>false</option></select>';
+  else if(t==='number')valBox.innerHTML='<input id="wfValue" type="number" step="any">';
+  else{
+    const vals=[...new Set(widgetRecords(source).map(r=>String(recVal(source,r,f)??'')).filter(Boolean))].sort().slice(0,30);
+    valBox.innerHTML=`<input id="wfValue" list="wfdl"><datalist id="wfdl">${vals.map(x=>`<option value="${attr(x)}">`).join('')}</datalist>`;
+  }
+}
+function openWidgetDrawer(preset={}){
+  const p={title:preset.title||'',source:preset.source||'roles',kind:preset.kind||'count',field:preset.field||''};
+  const needsField=['sum','avg','bar'].includes(p.kind);
+  const fieldChoices=p.kind==='bar'?widgetFieldChoices(p.source):widgetNumericChoices(p.source);
+  const filterChoices=[...new Map([...widgetFieldChoices(p.source),...widgetNumericChoices(p.source)]).entries()];
+  openDrawer('Add Dashboard Widget',`Up to ${MAX_WIDGETS} widgets live on the Insights tab and are saved in the CSV. They always show all data.`,
+    `<div class="grid">
+      <div><label>Title</label><input id="wTitle" value="${attr(p.title)}" placeholder="Optional — named automatically"></div>
+      <div><label>Data</label><select id="wSource">${[['roles','Roles'],['people','People'],['candidates','Slate rows (candidates)']].map(([val,label])=>`<option value="${val}" ${p.source===val?'selected':''}>${label}</option>`).join('')}</select></div>
+      <div><label>Widget</label><select id="wKind">${[['count','Number — count'],['percent','Number — % of total'],['sum','Number — sum of a field'],['avg','Number — average of a field'],['bar','Bar chart — breakdown by field']].map(([val,label])=>`<option value="${val}" ${p.kind===val?'selected':''}>${label}</option>`).join('')}</select></div>
+      <div class="${needsField?'':'hidden'}" id="wFieldBox"><label>${p.kind==='bar'?'Break down by':'Numeric field'}</label><select id="wField">${fieldChoices.map(([val,label])=>`<option value="${attr(val)}" ${p.field===val?'selected':''}>${esc(label)}</option>`).join('')||'<option value="">— add a Number field in Data Tools first —</option>'}</select></div>
+    </div>
+    <div class="rule-section"><h3>Filter (optional)</h3><div class="hint" style="margin-bottom:8px">Only include records that match. Operators follow the field&rsquo;s type — no &ldquo;greater than&rdquo; on text.</div>
+      <div class="grid">
+        <div><label>Field</label><select id="wfField"><option value="">— no filter —</option>${filterChoices.map(([val,label])=>`<option value="${attr(val)}">${esc(label)}</option>`).join('')}</select></div>
+        <div><label>Operator</label><span id="wfOpBox"><select id="wfOp" disabled><option></option></select></span></div>
+        <div><label>Value</label><span id="wfValueBox"><input id="wfValue" disabled placeholder="— no filter —"></span></div>
+      </div>
+    </div>`,
+    ()=>saveWidget(),'');
+  el('drawerSave').textContent='Add Widget';
+}
+function saveWidget(){
+  if(insightWidgets.length>=MAX_WIDGETS){notice('ERR',`The dashboard is limited to ${MAX_WIDGETS} widgets — remove one first.`);return}
+  const w={id:uid('W'),title:v('wTitle').trim(),source:v('wSource'),kind:v('wKind'),field:v('wField'),filter:null};
+  if(['sum','avg','bar'].includes(w.kind)&&!w.field){notice('ERR','Pick a field for this widget'+(w.kind!=='bar'?' — add a Number field in Data Tools if the list is empty.':'.'));return}
+  if(!['sum','avg','bar'].includes(w.kind))w.field='';
+  const ff=v('wfField');
+  if(ff){
+    const fv=v('wfValue');
+    if(!String(fv).trim()){notice('ERR','The filter needs a value — or set the filter field back to “no filter”.');return}
+    w.filter={field:ff,operator:v('wfOp')||'equals',value:fv};
+  }
+  if(!w.title)w.title=w.kind==='bar'?`${{roles:'Roles',people:'People',candidates:'Slate rows'}[w.source]} by ${w.field}`
+    :w.kind==='sum'?`Total ${w.field}`:w.kind==='avg'?`Average ${w.field}`
+    :w.kind==='percent'?`% of ${{roles:'roles',people:'people',candidates:'slate rows'}[w.source]}`
+    :`${{roles:'Roles',people:'People',candidates:'Slate rows'}[w.source]} count`;
+  pushUndo('Add dashboard widget');
+  insightWidgets.push(w);
+  log('Widget Added',w.title);
+  notice('OK',`Widget added: ${w.title}`);
+  activeTab='INSIGHTS';
+  closeDrawer();render();
+}
+function removeWidget(id){
+  const w=insightWidgets.find(x=>x.id===id);
+  if(!w)return;
+  pushUndo('Remove dashboard widget');
+  insightWidgets=insightWidgets.filter(x=>x.id!==id);
+  log('Widget Removed',w.title);
+  render();
+}
 Object.assign(ACTIONS,{
   exportXlsx:()=>{el('moreMenu').classList.remove('open');exportXlsxWorkbook()},
   shareExport:()=>{el('moreMenu').classList.remove('open');openShareDrawer()},
@@ -3006,10 +3178,18 @@ Object.assign(ACTIONS,{
   dataTools:()=>{el('moreMenu').classList.remove('open');openDataTools()},
   convertXlsx:()=>pickConvertXlsx(),
   convertCsv:()=>pickConvertCsv(),
+  addWidget:()=>openWidgetDrawer(),
+  removeWidget:d=>removeWidget(d.widgetId),
+});
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.id==='wSource'||t.id==='wKind')return openWidgetDrawer({title:v('wTitle'),source:v('wSource'),kind:v('wKind')});
+  if(t.id==='wfField')return updateWidgetFilterControls();
 });
 Object.assign(window.__APP__,{makeXlsx,readXlsx,makeZip,unzip,workbookSheets,rowsToCsvText,exportXlsxWorkbook,parseFullDbText,fullDbToImportInputs,importFilesFlow,buildScopedData,openShareDrawer,chessGoTo,chessNav,chessRoleGroups,
   openDataTools,saveDataTools,allowedTypesFor,fieldTypeOf,allExtraFieldNames,reviewFromWorkbookBuffer,convertedCsvFromReview,openImportReview,
   treeZoomBy,fitTreeView,initTreeView,
+  openWidgetDrawer,saveWidget,removeWidget,computeWidget,widgetFieldType,operatorChoicesFor,ruleFieldType,
   buildWorkbookBytes:()=>makeXlsx(workbookSheets()),
   importXlsxBuffer:async(buf,name)=>{const sheets=await readXlsx(buf);const texts=[];const notes=[];sheets.forEach(sh=>{if(!sh.rows.length)return;const type=detectSheetType(sh.rows[0].map(normalizeHeader));if(type&&type!=='FULL')texts.push({name:(name||'workbook.xlsx')+' ▸ '+sh.name,text:rowsToCsvText(sh.rows)});else notes.push({file:sh.name,severity:'INFO',problem:'Sheet skipped',action:''})});startSheetImport(texts,{notes})},
   importFullDbText:(name,text)=>{const inputs=fullDbToImportInputs(name,text);if(inputs)startSheetImport(inputs.texts,inputs.extras)},

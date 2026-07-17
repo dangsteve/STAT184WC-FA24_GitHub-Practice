@@ -37,7 +37,11 @@ only — the CSV file is always the real database, so keep saving.
 - **Candidates** — every person, stored once by Person ID. Edits update every
   slate that references them.
 - **Insights** — bench coverage, Ready-Now coverage, vacancies, and the roles
-  that need attention. The filter bar applies here too.
+  that need attention (the filter bar applies to these), plus **My Dashboard**:
+  up to 8 widgets of your own — a count or % with an optional filter ("roles
+  where risk equals High"), a sum or average of a Number field, or a bar
+  breakdown by any field. **+ Add widget** builds one in a few clicks, ✕
+  removes it, and widgets are saved in the CSV so the whole team sees them.
 - **Rules** — the guardrails. Flip a rule on/off right in the list.
 - **History** — the audit trail, saved inside the CSV.
 
