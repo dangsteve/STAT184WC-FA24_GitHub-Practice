@@ -39,9 +39,10 @@ only — the CSV file is always the real database, so keep saving.
 - **Insights** — bench coverage, Ready-Now coverage, vacancies, and the roles
   that need attention (the filter bar applies to these), plus **My Dashboard**:
   up to 8 widgets of your own — a count or % with an optional filter ("roles
-  where risk equals High"), a sum or average of a Number field, or a bar
-  breakdown by any field. **+ Add widget** builds one in a few clicks, ✕
-  removes it, and widgets are saved in the CSV so the whole team sees them.
+  where risk equals High"), a sum or average of a Number field, or a **bar,
+  pie or donut** breakdown by any field. **+ Add widget** builds one in a few
+  clicks, ✕ removes it, and widgets are saved in the CSV so the whole team
+  sees them.
 - **Rules** — the guardrails. Flip a rule on/off right in the list.
 - **History** — the audit trail, saved inside the CSV.
 
@@ -140,12 +141,16 @@ CSV and become available everywhere, including rule builders and filters.
     CSV (with the usual review + error report), or upload a planner CSV and
     download an Excel workbook — without importing anything into what you have
     open. Handy for prepping files before uploading them.
-  - **Custom field types**: give your own fields a type — Text, Number, or
-    True/False — like cell formats in Excel. Types drive the right input in the
-    forms, validation warnings on import, and unlock **greater/less-than** rule
-    operators on Number fields. A type is locked if the existing data doesn't
-    fit it (letters can't become a Number), and numeric-looking fields like
-    postal codes can deliberately stay Text.
+  - **Field types**: give fields a type — Text, Number, or True/False — like
+    cell formats in Excel. Types drive the right input in the forms (true/false
+    dropdowns, numeric inputs), block bad values on save and in "+ Add value",
+    warn on import, and unlock **greater/less-than** rule operators on Number
+    fields. Numeric fields accept **ranges with a dash** (e.g. `2-5`) — the one
+    exception to "no letters". **Built-in fields can be re-typed too**: clean
+    Readiness up to numbers/ranges and you can make it a Number. A type is
+    locked while the existing data doesn't fit it, and numeric-looking fields
+    like postal codes can deliberately stay Text. "+ Add field" on any person
+    or role also asks for the type right there.
   - **Bulk add fields**: paste one field per line (`Name, type, applies to`)
     to set up many columns at once.
 

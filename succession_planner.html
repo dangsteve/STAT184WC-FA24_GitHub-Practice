@@ -430,6 +430,13 @@ const DEFAULT_LEVELS=['CEO','C-Suite','EVP','SVP','VP','Sr Director','Director',
 const CANDIDATE_FIELDS=['readiness','source','candidateType','confidence','location','jobLevel','performance','potential','retentionRisk','mobility','criticalExperience','skills','department'];
 const TEXT_OPERATORS=['contains','not contains','greater than','less than'];
 const FIELD_TYPES=['text','number','boolean'];
+const BUILTIN_TYPABLE=[...CANDIDATE_FIELDS,'level','risk','criticality','status','owner'];
+// numeric fields accept plain numbers or a dash range like 2-5 (the one exception)
+const NUM_RANGE_RE=/^\s*-?\d+(\.\d+)?(\s*-\s*-?\d+(\.\d+)?)?\s*$/;
+/* categorical palette for pie/donut slices — validated with the dataviz palette
+   checker (lightness band, chroma, CVD ΔE 9.1, normal-vision ΔE 19.6, all PASS;
+   the contrast warning is covered by the always-on labeled legend) */
+const CHART_COLORS=['#2a78d6','#008300','#e87ba4','#eda100','#1baf7a','#eb6834'];
 const CHESS_DEFAULT_FIELDS=['title','readiness','candidateType'];
 const CHESS_PIECES=[['♛','Queen'],['♜','Rook'],['♝','Bishop'],['♞','Knight'],['♟','Pawn']];
 const BACKUP_KEY='succession_planner_backup_v1';
@@ -651,6 +658,8 @@ function handleCustomSelect(sel){
     sel.value=previous;return;
   }
   openSmallValueBox('Add value',value=>{
+    const terr=typedValueError(field,value);
+    if(terr){notice('ERR',terr);return}
     addCustomValue(field,value);
     markDirty();
     if(sel.id==='rBoard'){
@@ -1480,16 +1489,32 @@ function rulePersonOptions(sel=''){return '<option value=""></option>'+people.ma
 /* ---------- user-defined extra fields (future CSV columns) ---------- */
 function extraKeysFor(list){const s=new Set();list.forEach(e=>Object.keys(e._x||{}).forEach(k=>s.add(k)));return[...s].sort((a,b)=>a.localeCompare(b))}
 function fieldTypeOf(name){return (fieldTypes[name]||{}).type||'text'}
+function typedValueError(field,value){
+  const val=String(value??'').trim();
+  if(!val||!fieldTypes[field])return null;
+  const t=fieldTypeOf(field);
+  if(t==='number'&&!NUM_RANGE_RE.test(val))return `"${field}" must be a number or a range like 2-5 — got "${value}".`;
+  if(t==='boolean'&&!['true','false'].includes(val.toLowerCase()))return `"${field}" must be true or false — got "${value}".`;
+  return null;
+}
 function extraKeysWithRegistry(list,kind){
   const s=new Set(extraKeysFor(list));
-  Object.entries(fieldTypes).forEach(([k,def])=>{if(!def)return;const on=def.on||'all';if(on==='all'||on===kind)s.add(k)});
+  Object.entries(fieldTypes).forEach(([k,def])=>{if(!def||BUILTIN_TYPABLE.includes(k))return;const on=def.on||'all';if(on==='all'||on===kind)s.add(k)});
   return[...s].sort((a,b)=>a.localeCompare(b));
 }
 function extraFieldInput(k,val){
   const t=fieldTypeOf(k);
-  if(t==='boolean')return `<select class="extraField" data-extra-key="${attr(k)}"><option value=""></option><option ${norm(val)==='true'?'selected':''}>true</option><option ${norm(val)==='false'?'selected':''}>false</option></select>`;
-  if(t==='number')return `<input type="number" step="any" class="extraField" data-extra-key="${attr(k)}" value="${attr(val||'')}">`;
+  if(t==='boolean')return `<select class="extraField" data-extra-key="${attr(k)}" data-ftype="boolean"><option value=""></option><option ${norm(val)==='true'?'selected':''}>true</option><option ${norm(val)==='false'?'selected':''}>false</option></select>`;
+  if(t==='number')return `<input class="extraField" data-extra-key="${attr(k)}" data-ftype="number" value="${attr(val||'')}" placeholder="number or range (2-5)">`;
   return `<input class="extraField" data-extra-key="${attr(k)}" value="${attr(val||'')}">`;
+}
+function formControl(id,options,selected,field){
+  if(fieldTypes[field]){
+    const t=fieldTypeOf(field);
+    if(t==='boolean')return `<select id="${id}" data-ftype="boolean"><option value=""></option><option ${norm(selected)==='true'?'selected':''}>true</option><option ${norm(selected)==='false'?'selected':''}>false</option></select>`;
+    if(t==='number')return `<input id="${id}" data-ftype="number" value="${attr(selected||'')}" placeholder="number or range (2-5)">`;
+  }
+  return `<select id="${id}" data-change="customSelect">${customSelectOptions(options,selected,field)}</select>`;
 }
 function extraFieldsSection(entity,list,kind){
   const keys=extraKeysWithRegistry(list,kind);
@@ -1502,16 +1527,35 @@ function collectExtras(existing){
   return Object.keys(out).length?out:undefined;
 }
 function addExtraFieldPrompt(){
-  openSmallValueBox('Add a new field (becomes a CSV column)',name=>{
-    name=name.replace(/[",\r\n]/g,' ').trim();
+  const old=el('smallValueModal');if(old)old.remove();
+  const kind=el('pId')?'person':'role';
+  const wrap=document.createElement('div');
+  wrap.id='smallValueModal';wrap.className='modal-backdrop';
+  wrap.innerHTML=`<div class="modal"><h3>Add a new field</h3><div class="hint" style="margin-bottom:10px">Becomes a CSV column and appears on every ${kind} from now on. The type works like a cell format in Excel — numeric fields accept numbers or ranges like 2-5.</div>
+    <label>Field name</label><input id="smallValueInput" placeholder="e.g. Bonus Target" style="margin-bottom:10px">
+    <label>Type</label><select id="smallValueType" style="margin-bottom:12px"><option value="text">Text</option><option value="number">Number</option><option value="boolean">True / False</option></select>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn btn-quiet" id="smallCancel">Cancel</button><button type="button" class="btn btn-primary" id="smallAdd">Add</button></div></div>`;
+  document.body.appendChild(wrap);
+  const input=wrap.querySelector('#smallValueInput');
+  setTimeout(()=>input.focus(),40);
+  wrap.querySelector('#smallCancel').onclick=()=>wrap.remove();
+  wrap.addEventListener('mousedown',e=>{if(e.target===wrap)wrap.remove()});
+  const doAdd=()=>{
+    const name=input.value.replace(/[",\r\n]/g,' ').trim();
+    const type=wrap.querySelector('#smallValueType').value;
     if(!name)return;
-    if(CSV_HEADERS.includes(name)){notice('ERR',`"${name}" is already a built-in column.`);return}
+    if(CSV_HEADERS.includes(name)||BUILTIN_TYPABLE.includes(name)){notice('ERR',`"${name}" is already a built-in field.`);return}
     const box=document.querySelector('#drawerBody .extra-fields .grid');
-    if(!box)return;
+    if(!box){wrap.remove();return}
     if([...box.querySelectorAll('.extraField')].some(i=>i.dataset.extraKey===name)){notice('WARN','That field already exists.');return}
-    box.insertAdjacentHTML('beforeend',`<div><label>${esc(name)}</label><input class="extraField" data-extra-key="${attr(name)}" value=""></div>`);
-    notice('OK',`Field "${name}" added — fill it in and Save. It appears on every record of this type from now on.`);
-  });
+    fieldTypes[name]={type,on:kind};
+    markDirty();
+    wrap.remove();
+    box.insertAdjacentHTML('beforeend',`<div><label>${esc(name)}${type!=='text'?` <span class="chip">${type}</span>`:''}</label>${extraFieldInput(name,'')}</div>`);
+    notice('OK',`Field "${name}" (${type==='boolean'?'true/false':type}) added — fill it in and Save.`);
+  };
+  wrap.querySelector('#smallAdd').onclick=doAdd;
+  input.addEventListener('keydown',e=>{if(e.key==='Enter')doAdd();if(e.key==='Escape')wrap.remove()});
 }
 
 function openAddChooser(){
@@ -1531,18 +1575,18 @@ function personForm(p){
     <div><label>Person ID *</label><input id="pId" value="${attr(p.id)}"></div>
     <div><label>Name *</label><input id="pName" value="${attr(p.name)}"></div>
     <div><label>Current Title</label><input id="pTitle" value="${attr(p.title)}"></div>
-    <div><label>Department</label><select id="pDept" data-change="customSelect">${customSelectOptions([],p.department,'department')}</select></div>
+    <div><label>Department</label>${formControl('pDept',[],p.department,'department')}</div>
     <div><label>Email / Employee ID</label><input id="pEmail" value="${attr(p.email)}"></div>
-    <div><label>Location</label><select id="pLoc" data-change="customSelect">${customSelectOptions([],p.location,'location')}</select></div>
-    <div><label>Job Level</label><select id="pJob" data-change="customSelect">${customSelectOptions(DEFAULT_LEVELS,p.jobLevel,'jobLevel')}</select></div>
-    <div><label>Readiness</label><select id="pReady" data-change="customSelect">${customSelectOptions(['Ready Now','1-2 Years','3-5 Years'],p.readiness,'readiness')}</select></div>
-    <div><label>Source</label><select id="pSource" data-change="customSelect">${customSelectOptions(['Internal','External'],p.source,'source')}</select></div>
-    <div><label>Candidate Type</label><select id="pType" data-change="customSelect">${customSelectOptions(['Employee / Incumbent','Successor','Athlete','Market Candidate'],p.candidateType,'candidateType')}</select></div>
-    <div><label>Performance</label><select id="pPerf" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],p.performance,'performance')}</select></div>
-    <div><label>Potential</label><select id="pPot" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],p.potential,'potential')}</select></div>
-    <div><label>Retention Risk</label><select id="pRet" data-change="customSelect">${customSelectOptions(['Low','Medium','High'],p.retentionRisk,'retentionRisk')}</select></div>
-    <div><label>Mobility</label><select id="pMob" data-change="customSelect">${customSelectOptions(['Yes','No','Unknown'],p.mobility,'mobility')}</select></div>
-    <div><label>Confidence</label><select id="pConf" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],p.confidence,'confidence')}</select></div>
+    <div><label>Location</label>${formControl('pLoc',[],p.location,'location')}</div>
+    <div><label>Job Level</label>${formControl('pJob',DEFAULT_LEVELS,p.jobLevel,'jobLevel')}</div>
+    <div><label>Readiness</label>${formControl('pReady',['Ready Now','1-2 Years','3-5 Years'],p.readiness,'readiness')}</div>
+    <div><label>Source</label>${formControl('pSource',['Internal','External'],p.source,'source')}</div>
+    <div><label>Candidate Type</label>${formControl('pType',['Employee / Incumbent','Successor','Athlete','Market Candidate'],p.candidateType,'candidateType')}</div>
+    <div><label>Performance</label>${formControl('pPerf',['High','Medium','Low'],p.performance,'performance')}</div>
+    <div><label>Potential</label>${formControl('pPot',['High','Medium','Low'],p.potential,'potential')}</div>
+    <div><label>Retention Risk</label>${formControl('pRet',['Low','Medium','High'],p.retentionRisk,'retentionRisk')}</div>
+    <div><label>Mobility</label>${formControl('pMob',['Yes','No','Unknown'],p.mobility,'mobility')}</div>
+    <div><label>Confidence</label>${formControl('pConf',['High','Medium','Low'],p.confidence,'confidence')}</div>
     <div class="full"><label>Critical Experience</label><input id="pExp" value="${attr(p.criticalExperience)}"></div>
     <div class="full"><label>Skills</label><input id="pSkills" value="${attr(p.skills)}"></div>
     <div class="full"><label>Notes</label><textarea id="pNotes">${esc(p.notes)}</textarea></div>
@@ -1581,10 +1625,18 @@ function renamePersonRefs(oldId,newId){
   if(selectedPersonId===oldId)selectedPersonId=newId;
   if(importBaseline){importBaseline.successors.forEach(s=>{if(s.personId===oldId)s.personId=newId});importBaseline.roles.forEach(r=>{if(r.incumbentPersonId===oldId)r.incumbentPersonId=newId})}
 }
+function typedFormErrors(pairs){
+  const errs=[];
+  pairs.forEach(([iid,f])=>{const err=typedValueError(f,v(iid));if(err)errs.push(err)});
+  document.querySelectorAll('#drawerBody .extraField').forEach(i=>{const err=typedValueError(i.dataset.extraKey,i.value);if(err)errs.push(err)});
+  return errs;
+}
 function savePerson(oldId=''){
   const id=v('pId').trim(),name=v('pName').trim();
   if(!id||!name){notice('ERR','Person ID and Name are required.');return}
   if(id!==oldId&&person(id)){notice('ERR',`Person ID "${id}" is already used by ${personName(id)}. Pick a unique ID.`);return}
+  const typedErrs=typedFormErrors([['pReady','readiness'],['pSource','source'],['pType','candidateType'],['pPerf','performance'],['pPot','potential'],['pRet','retentionRisk'],['pMob','mobility'],['pConf','confidence'],['pDept','department'],['pLoc','location'],['pJob','jobLevel'],['pExp','criticalExperience'],['pSkills','skills']]);
+  if(typedErrs.length){notice('ERR',typedErrs[0]);return}
   pushUndo(oldId?'Update employee/candidate':'Add employee/candidate');
   const val=x=>v(x)==='__ADD__'?'':v(x);
   const obj={id,name,title:v('pTitle'),department:val('pDept'),email:v('pEmail'),location:val('pLoc'),jobLevel:val('pJob'),readiness:val('pReady'),source:val('pSource'),candidateType:val('pType'),performance:val('pPerf'),potential:val('pPot'),retentionRisk:val('pRet'),mobility:val('pMob'),confidence:val('pConf'),criticalExperience:v('pExp'),skills:v('pSkills'),notes:v('pNotes'),_x:collectExtras(oldId?person(oldId)?._x:undefined)};
@@ -1630,13 +1682,13 @@ function openRoleDrawer(id=''){
     `<div class="grid">
       <div><label>Role ID *</label><input id="rId" value="${attr(r.id)}"></div>
       <div><label>Role Title *</label><input id="rTitle" value="${attr(r.title)}"></div>
-      <div><label>Level</label><select id="rLevel" data-change="customSelect">${customSelectOptions(DEFAULT_LEVELS,r.level,'level')}</select></div>
-      <div><label>Department</label><select id="rDept" data-change="customSelect">${customSelectOptions([],r.department,'department')}</select></div>
+      <div><label>Level</label>${formControl('rLevel',DEFAULT_LEVELS,r.level,'level')}</div>
+      <div><label>Department</label>${formControl('rDept',[],r.department,'department')}</div>
       <div><label>Board / Tab</label><select id="rBoard" data-change="customSelect">${boardOptions(r.boardId)}</select></div>
       <div><label>Manager Role</label><select id="rManager" data-change="customSelect">${roleOptions(r.managerRoleId)}</select></div>
       <div><label>Current Person</label><select id="rInc">${personOptions(r.incumbentPersonId)}</select></div>
-      <div><label>Risk</label><select id="rRisk" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],r.risk,'risk')}</select></div>
-      <div><label>Criticality</label><select id="rCrit" data-change="customSelect">${customSelectOptions(['High','Medium','Low'],r.criticality,'criticality')}</select></div>
+      <div><label>Risk</label>${formControl('rRisk',['High','Medium','Low'],r.risk,'risk')}</div>
+      <div><label>Criticality</label>${formControl('rCrit',['High','Medium','Low'],r.criticality,'criticality')}</div>
       <div><label>Owner</label><input id="rOwner" value="${attr(r.owner)}"></div>
       <div><label>Status</label><input id="rStatus" value="${attr(r.status)}"></div>
       <div><label>Sort Order</label><input id="rSort" type="number" value="${attr(r.sortOrder)}"></div>
@@ -1664,6 +1716,8 @@ function saveRole(oldId=''){
   const managerId=v('rManager');
   if(managerId&&oldId&&(managerId===oldId||isDescendant(managerId,oldId))){notice('ERR','That manager would create a circular reporting line.');return}
   if(managerId&&managerId===id){notice('ERR','A role cannot report to itself.');return}
+  const typedErrs=typedFormErrors([['rLevel','level'],['rDept','department'],['rRisk','risk'],['rCrit','criticality'],['rStatus','status'],['rOwner','owner']]);
+  if(typedErrs.length){notice('ERR',typedErrs[0]);return}
   pushUndo(oldId?'Update role':'Add role');
   const val=x=>v(x)==='__ADD__'?'':v(x);
   const inc=v('rInc');
@@ -1688,7 +1742,7 @@ function deleteRole(id){
 
 /* ---------- rule drawer ---------- */
 function ruleFieldChoices(){
-  const extras=new Set([...extraKeysFor(people),...extraKeysFor(successors),...Object.keys(fieldTypes)]);
+  const extras=new Set([...extraKeysFor(people),...extraKeysFor(successors),...Object.keys(fieldTypes)].filter(k=>!BUILTIN_TYPABLE.includes(k)&&!CANDIDATE_FIELDS.includes(k)));
   return[...CANDIDATE_FIELDS,...[...extras].sort((a,b)=>a.localeCompare(b))];
 }
 function fieldOptions(selected=''){
@@ -1715,7 +1769,7 @@ function valueCheckboxesForField(field,selected=''){
   const boxes=vals.map(x=>{const bid=checkboxId();return `<label for="${bid}"><input id="${bid}" type="checkbox" class="condValCheck" value="${attr(x)}" ${sel.includes(x)?'checked':''}>${esc(x||'-- no values yet --')}</label>`}).join('');
   return `<div class="value-picker"><label class="select-all" for="${allId}"><input id="${allId}" type="checkbox" class="selAll" ${vals.length&&vals.every(x=>sel.includes(x))?'checked':''}>Select all</label>${boxes}<button type="button" class="btn btn-quiet btn-sm" data-action="addCheckboxValue" style="margin-top:6px">+ Add value</button></div>`;
 }
-function ruleFieldType(field){return CANDIDATE_FIELDS.includes(field)?'text':fieldTypeOf(field)}
+function ruleFieldType(field){return fieldTypes[field]?fieldTypeOf(field):'text'}
 function operatorChoicesFor(t){
   if(t==='number')return[['equals','equal to'],['not equals','not equal to'],['greater than','greater than'],['less than','less than'],['list','any of (list)']];
   if(t==='boolean')return[['equals','equal to'],['not equals','not equal to']];
@@ -1762,6 +1816,8 @@ function toggleAllCondValues(box){box.closest('.value-picker').querySelectorAll(
 function addRuleCheckboxValue(btn){
   const row=btn.closest('.condition-row'),field=row.querySelector('.condField').value;
   openSmallValueBox('Add rule value',value=>{
+    const terr=typedValueError(field,value);
+    if(terr){notice('ERR',terr);return}
     addCustomValue(field,value);markDirty();
     const current=getConditionValues(row);
     row.querySelector('.condValueBox').innerHTML=valueControlForCondition(field,row.querySelector('.condOperator').value,current?current+'|'+value:value);
@@ -1772,6 +1828,8 @@ function handleRuleValueSelect(sel){
   const row=sel.closest('.condition-row'),field=row.querySelector('.condField').value;
   const prev=sel.dataset.previous||sel.options[0]?.value||'';
   openSmallValueBox('Add rule value',value=>{
+    const terr=typedValueError(field,value);
+    if(terr){notice('ERR',terr);return}
     addCustomValue(field,value);markDirty();
     const opt=document.createElement('option');opt.value=value;opt.textContent=value;
     sel.insertBefore(opt,sel.querySelector('option[value="__ADD__"]'));
@@ -2446,10 +2504,8 @@ function buildSheetImport(fileTexts,dbExtras,base){
   const add=(file,row,sheet,id,field,severity,problem,action)=>{report.push({file,row,sheet,id:id||'',field:field||'',severity,problem,action:action||''});if(severity==='ERROR')stats.errors++;else if(severity==='WARNING')stats.warnings++;else stats.other++};
   const checkTypedExtras=(x,file,row,label,id)=>{
     Object.entries(x||{}).forEach(([k,val])=>{
-      const t=fieldTypeOf(k);const v=String(val??'').trim();
-      if(!v)return;
-      if(t==='number'&&!/^-?[\d,]*\.?\d+$/.test(v))add(file,row,label,id,k,'WARNING',`"${k}" is a Number field but got "${v}"`,'Imported as-is');
-      if(t==='boolean'&&!['true','false'].includes(v.toLowerCase()))add(file,row,label,id,k,'WARNING',`"${k}" is a True/False field but got "${v}"`,'Imported as-is');
+      const err=typedValueError(k,val);
+      if(err)add(file,row,label,id,k,'WARNING',err,'Imported as-is');
     });
   };
   const findPerson=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=staged.people.find(p=>p.id===ref);if(hit)return hit;const byName=staged.people.filter(p=>norm(p.name)===norm(ref));return byName.length===1?byName[0]:(byName.length?'AMBIG':null)};
@@ -2968,13 +3024,21 @@ function pickConvertCsv(){
   input.click();
 }
 function allExtraFieldNames(){
-  return[...new Set([...extraKeysFor(people),...extraKeysFor(roles),...extraKeysFor(successors),...Object.keys(fieldTypes)])].sort((a,b)=>a.localeCompare(b));
+  return[...new Set([...extraKeysFor(people),...extraKeysFor(roles),...extraKeysFor(successors),...Object.keys(fieldTypes)])].filter(k=>!BUILTIN_TYPABLE.includes(k)).sort((a,b)=>a.localeCompare(b));
+}
+function fieldValueSamples(name){
+  const vals=[];
+  const grab=x=>{const s=String(x??'').trim();if(s)vals.push(s)};
+  [...people,...roles,...successors].forEach(e=>{
+    if(name in e)grab(e[name]);
+    grab((e._x||{})[name]);
+  });
+  return vals;
 }
 function allowedTypesFor(name){
-  const vals=[];
-  [...people,...roles,...successors].forEach(e=>{const v=(e._x||{})[name];if(String(v??'').trim()!=='')vals.push(String(v).trim())});
-  const number=vals.every(v=>/^-?[\d,]*\.?\d+$/.test(v));
-  const boolean=vals.every(v=>['true','false'].includes(v.toLowerCase()));
+  const vals=fieldValueSamples(name);
+  const number=vals.every(x=>NUM_RANGE_RE.test(x));
+  const boolean=vals.every(x=>['true','false'].includes(x.toLowerCase()));
   return{text:true,number:vals.length===0||number,boolean:vals.length===0||boolean,count:vals.length,samples:[...new Set(vals)].slice(0,3)};
 }
 function suggestedScope(name){
@@ -3004,8 +3068,16 @@ function openDataTools(){
         <div class="choice-card"><h3>Excel &rarr; Planner CSV</h3><div class="hint">Upload a workbook (People / Roles / Candidates / Boards tabs). You get the usual review and error report, then the converted CSV downloads.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="convertXlsx">Upload .xlsx&hellip;</button></div></div>
         <div class="choice-card"><h3>Planner CSV &rarr; Excel</h3><div class="hint">Upload a planner CSV and download it as an Excel workbook with tabs.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="convertCsv">Upload .csv&hellip;</button></div></div>
       </div></div>
-    <div class="rule-section"><h3>Custom Field Types</h3><div class="hint" style="margin-bottom:8px">A type is locked when the existing values don&rsquo;t fit it (letters can never become a Number) — and numeric-looking fields like postal codes may stay Text on purpose. Number fields unlock the greater/less-than rule operators.</div>
+    <div class="rule-section"><h3>Custom Field Types</h3><div class="hint" style="margin-bottom:8px">A type is locked when the existing values don&rsquo;t fit it (letters can never become a Number) — and numeric-looking fields like postal codes may stay Text on purpose. Number fields accept ranges like 2-5 and unlock the greater/less-than rule operators.</div>
       ${fields.length?`<div class="tablebox"><table class="table"><thead><tr><th>Field</th><th>Type</th><th>Applies to</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="hint">No custom fields yet — bulk-add some below or use “+ Add field” on any person/role.</div>'}
+    </div>
+    <div class="rule-section"><h3>Built-in Field Types</h3><div class="hint" style="margin-bottom:8px">The standard fields can be re-typed too — e.g. if you change every Readiness value to numbers or ranges (2-5), you can make it a Number and use greater/less-than rules on it. Locked options mean the current data doesn&rsquo;t fit yet.</div>
+      <div class="tablebox"><table class="table"><thead><tr><th>Field</th><th>Type</th><th></th></tr></thead><tbody>${BUILTIN_TYPABLE.map(name=>{
+        const a=allowedTypesFor(name);
+        const cur=fieldTypeOf(name);
+        const opt=(val,label,ok)=>`<option value="${val}" ${cur===val?'selected':''} ${ok?'':'disabled'}>${label}${ok?'':' — locked by existing data'}</option>`;
+        return `<tr><td><b>${esc(name)}</b><div class="hint">${a.count?plur(a.count,'value')+' · e.g. '+esc(a.samples.join(', ')):'no values yet'}</div></td><td><select class="ftType" data-field="${attr(name)}" data-builtin="1">${opt('text','Text',true)+opt('number','Number',a.number)+opt('boolean','True / False',a.boolean)}</select></td><td class="hint">built-in</td></tr>`;
+      }).join('')}</tbody></table></div>
     </div>
     <div class="rule-section"><h3>Bulk Add Fields</h3><div class="hint" style="margin-bottom:8px">One field per line: <b>Name, type, applies to</b> — type is text / number / boolean, applies-to is person / role / candidate / all (both optional).</div>
       <textarea id="bulkFields" placeholder="Bonus Target, number, person&#10;Remote OK, boolean, person&#10;Cost Center"></textarea>
@@ -3015,7 +3087,7 @@ function openDataTools(){
 }
 function saveDataTools(){
   const changes={};
-  document.querySelectorAll('#drawerBody .ftType').forEach(sel=>{changes[sel.dataset.field]={type:sel.value,on:'all'}});
+  document.querySelectorAll('#drawerBody .ftType').forEach(sel=>{changes[sel.dataset.field]={type:sel.value,on:sel.dataset.builtin?'builtin':'all'}});
   document.querySelectorAll('#drawerBody .ftOn').forEach(sel=>{if(changes[sel.dataset.field])changes[sel.dataset.field].on=sel.value});
   const skipped=[];const added=[];
   v('bulkFields').split('\n').map(l=>l.trim()).filter(Boolean).forEach(line=>{
@@ -3023,7 +3095,7 @@ function saveDataTools(){
     const name=(parts[0]||'').replace(/["\r\n]/g,'').trim();
     let type=(parts[1]||'text').toLowerCase(),on=(parts[2]||'all').toLowerCase();
     if(!name)return;
-    if(CSV_HEADERS.includes(name)){skipped.push(`"${name}" is a built-in column`);return}
+    if(CSV_HEADERS.includes(name)||BUILTIN_TYPABLE.includes(name)){skipped.push(`"${name}" is a built-in field — set its type in the table above`);return}
     if(changes[name]){skipped.push(`"${name}" already exists`);return}
     if(!FIELD_TYPES.includes(type))type='text';
     if(!['all','person','role','candidate'].includes(on))on='all';
@@ -3033,6 +3105,8 @@ function saveDataTools(){
     const a=allowedTypesFor(name);
     if((def.type==='number'&&!a.number)||(def.type==='boolean'&&!a.boolean)){notice('ERR',`"${name}" can’t be ${def.type} — existing values don’t fit. Fix the data first.`);return}
   }
+  // built-ins default to text — only keep entries that actually re-type them
+  Object.entries(changes).forEach(([k,def])=>{if(def.on==='builtin'&&def.type==='text')delete changes[k]});
   pushUndo('Update custom fields');
   fieldTypes=changes;
   log('Fields Updated',`${Object.keys(changes).length} custom field definition(s) saved${added.length?'; added: '+added.join(', '):''}`);
@@ -3065,7 +3139,12 @@ function widgetFieldChoices(source){
 function widgetNumericChoices(source){
   const base=source==='roles'?[['sortOrder','Sort Order']]:source==='candidates'?[['ranking','Ranking']]:[];
   const scope={roles:'role',people:'person',candidates:'candidate'}[source];
-  const typed=Object.entries(fieldTypes).filter(([k,def])=>def&&def.type==='number'&&(!def.on||def.on==='all'||def.on===scope)).map(([k])=>[k,k]);
+  const builtinFor={roles:['level','risk','criticality','status','owner','department'],people:CANDIDATE_FIELDS,candidates:['readiness','source','candidateType','confidence']};
+  const typed=Object.entries(fieldTypes).filter(([k,def])=>{
+    if(!def||def.type!=='number')return false;
+    if(def.on==='builtin')return (builtinFor[source]||[]).includes(k);
+    return !def.on||def.on==='all'||def.on===scope;
+  }).map(([k])=>[k,k]);
   return[...base,...typed];
 }
 function computeWidget(w){
@@ -3084,12 +3163,36 @@ function computeWidget(w){
   }
   const groups={};
   list.forEach(r=>{const k=String(recVal(w.source,r,w.field)??'')||'(blank)';groups[k]=(groups[k]||0)+1});
-  const bars=Object.entries(groups).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const entries=Object.entries(groups).sort((a,b)=>b[1]-a[1]);
+  if(w.kind==='pie'||w.kind==='donut'){
+    const slices=entries.slice(0,5);
+    const rest=entries.slice(5).reduce((a,[,n])=>a+n,0);
+    if(rest)slices.push(['Other',rest]);
+    return{slices,total:list.length};
+  }
+  const bars=entries.slice(0,10);
   return{bars,max:Math.max(1,...bars.map(b=>b[1]))};
+}
+function donutSvg(slices,total,hole){
+  const C=60,R=52;
+  if(!total)return `<svg viewBox="0 0 120 120" width="132" height="132" role="img"><circle cx="${C}" cy="${C}" r="${R}" fill="var(--line2)"/></svg>`;
+  let a0=-Math.PI/2;
+  const paths=slices.map(([k,n],i)=>{
+    const frac=n/total,color=CHART_COLORS[i%CHART_COLORS.length];
+    if(frac>=0.999){a0+=frac*2*Math.PI;return `<circle cx="${C}" cy="${C}" r="${R}" fill="${color}" stroke="#fff" stroke-width="2"/>`}
+    const a1=a0+frac*2*Math.PI;
+    const large=(a1-a0)>Math.PI?1:0;
+    const x0=C+R*Math.cos(a0),y0=C+R*Math.sin(a0),x1=C+R*Math.cos(a1),y1=C+R*Math.sin(a1);
+    const d=`M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${R} ${R} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} L ${C} ${C} Z`;
+    a0=a1;
+    return `<path d="${d}" fill="${color}" stroke="#fff" stroke-width="2"></path>`;
+  }).join('');
+  const center=hole?`<circle cx="${C}" cy="${C}" r="30" fill="var(--surface)"></circle><text x="${C}" y="${C+6}" text-anchor="middle" style="font-size:17px;font-weight:700;fill:var(--ink)">${total}</text>`:'';
+  return `<svg viewBox="0 0 120 120" width="132" height="132" role="img" aria-label="share chart">${paths}${center}</svg>`;
 }
 function widgetDesc(w){
   const src={roles:'roles',people:'people',candidates:'slate rows'}[w.source];
-  let s=w.kind==='bar'?`${src} by ${w.field}`:{count:'count of '+src,percent:'% of '+src,sum:`sum of ${w.field} across ${src}`,avg:`average ${w.field} across ${src}`}[w.kind];
+  let s=['bar','pie','donut'].includes(w.kind)?`${src} by ${w.field}`:{count:'count of '+src,percent:'% of '+src,sum:`sum of ${w.field} across ${src}`,avg:`average ${w.field} across ${src}`}[w.kind];
   if(w.filter&&w.filter.field)s+=` where ${w.filter.field} ${w.filter.operator} ${w.filter.value}`;
   return s+' · all data';
 }
@@ -3097,9 +3200,13 @@ function renderWidgetCards(){
   if(!insightWidgets.length)return '';
   const cards=insightWidgets.map(w=>{
     const c=computeWidget(w);
-    const body=c.bars
-      ?(c.bars.map(([k,n])=>`<div class="barrow"><span class="lbl" title="${attr(k)}">${esc(k)}</span><span class="track"><span class="fill" style="width:${pct(n,c.max)}%"></span></span><span class="val">${n}</span></div>`).join('')||'<div class="hint">No data.</div>')
-      :`<b style="font-size:26px;line-height:1.2">${esc(c.big)}</b>${c.sub?`<div class="hint">${esc(c.sub)}</div>`:''}`;
+    let body;
+    if(c.bars)body=c.bars.map(([k,n])=>`<div class="barrow"><span class="lbl" title="${attr(k)}">${esc(k)}</span><span class="track"><span class="fill" style="width:${pct(n,c.max)}%"></span></span><span class="val">${n}</span></div>`).join('')||'<div class="hint">No data.</div>';
+    else if(c.slices){
+      const legend=c.slices.map(([k,n],i)=>`<div style="display:flex;align-items:center;gap:7px;font-size:12px;margin:3px 0"><span style="width:10px;height:10px;border-radius:3px;background:${CHART_COLORS[i%CHART_COLORS.length]};flex:none"></span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(k)}">${esc(k)}</span><span style="margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums">${n} · ${pct(n,c.total)}%</span></div>`).join('');
+      body=`<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><div>${donutSvg(c.slices,c.total,w.kind==='donut')}</div><div style="flex:1;min-width:140px">${legend||'<div class="hint">No data.</div>'}</div></div>`;
+    }
+    else body=`<b style="font-size:26px;line-height:1.2">${esc(c.big)}</b>${c.sub?`<div class="hint">${esc(c.sub)}</div>`:''}`;
     return `<div class="insight-card"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px"><h3 style="margin:0">${esc(w.title)}</h3><button class="icon-btn bad" data-action="removeWidget" data-widget-id="${attr(w.id)}" title="Remove this widget">&#10005;</button></div>${body}<div class="hint" style="margin-top:8px">${esc(widgetDesc(w))}</div></div>`;
   }).join('');
   return `<div class="side-title" style="margin:2px 0 8px">My Dashboard</div><div class="insight-grid" style="margin-bottom:18px">${cards}</div>`;
@@ -3121,15 +3228,15 @@ function updateWidgetFilterControls(){
 }
 function openWidgetDrawer(preset={}){
   const p={title:preset.title||'',source:preset.source||'roles',kind:preset.kind||'count',field:preset.field||''};
-  const needsField=['sum','avg','bar'].includes(p.kind);
-  const fieldChoices=p.kind==='bar'?widgetFieldChoices(p.source):widgetNumericChoices(p.source);
+  const needsField=['sum','avg','bar','pie','donut'].includes(p.kind);
+  const fieldChoices=['bar','pie','donut'].includes(p.kind)?widgetFieldChoices(p.source):widgetNumericChoices(p.source);
   const filterChoices=[...new Map([...widgetFieldChoices(p.source),...widgetNumericChoices(p.source)]).entries()];
   openDrawer('Add Dashboard Widget',`Up to ${MAX_WIDGETS} widgets live on the Insights tab and are saved in the CSV. They always show all data.`,
     `<div class="grid">
       <div><label>Title</label><input id="wTitle" value="${attr(p.title)}" placeholder="Optional — named automatically"></div>
       <div><label>Data</label><select id="wSource">${[['roles','Roles'],['people','People'],['candidates','Slate rows (candidates)']].map(([val,label])=>`<option value="${val}" ${p.source===val?'selected':''}>${label}</option>`).join('')}</select></div>
-      <div><label>Widget</label><select id="wKind">${[['count','Number — count'],['percent','Number — % of total'],['sum','Number — sum of a field'],['avg','Number — average of a field'],['bar','Bar chart — breakdown by field']].map(([val,label])=>`<option value="${val}" ${p.kind===val?'selected':''}>${label}</option>`).join('')}</select></div>
-      <div class="${needsField?'':'hidden'}" id="wFieldBox"><label>${p.kind==='bar'?'Break down by':'Numeric field'}</label><select id="wField">${fieldChoices.map(([val,label])=>`<option value="${attr(val)}" ${p.field===val?'selected':''}>${esc(label)}</option>`).join('')||'<option value="">— add a Number field in Data Tools first —</option>'}</select></div>
+      <div><label>Widget</label><select id="wKind">${[['count','Number — count'],['percent','Number — % of total'],['sum','Number — sum of a field'],['avg','Number — average of a field'],['bar','Bar chart — breakdown by field'],['pie','Pie chart — share by field'],['donut','Donut chart — share by field']].map(([val,label])=>`<option value="${val}" ${p.kind===val?'selected':''}>${label}</option>`).join('')}</select></div>
+      <div class="${needsField?'':'hidden'}" id="wFieldBox"><label>${['bar','pie','donut'].includes(p.kind)?'Break down by':'Numeric field'}</label><select id="wField">${fieldChoices.map(([val,label])=>`<option value="${attr(val)}" ${p.field===val?'selected':''}>${esc(label)}</option>`).join('')||'<option value="">— add a Number field in Data Tools first —</option>'}</select></div>
     </div>
     <div class="rule-section"><h3>Filter (optional)</h3><div class="hint" style="margin-bottom:8px">Only include records that match. Operators follow the field&rsquo;s type — no &ldquo;greater than&rdquo; on text.</div>
       <div class="grid">
@@ -3144,15 +3251,16 @@ function openWidgetDrawer(preset={}){
 function saveWidget(){
   if(insightWidgets.length>=MAX_WIDGETS){notice('ERR',`The dashboard is limited to ${MAX_WIDGETS} widgets — remove one first.`);return}
   const w={id:uid('W'),title:v('wTitle').trim(),source:v('wSource'),kind:v('wKind'),field:v('wField'),filter:null};
-  if(['sum','avg','bar'].includes(w.kind)&&!w.field){notice('ERR','Pick a field for this widget'+(w.kind!=='bar'?' — add a Number field in Data Tools if the list is empty.':'.'));return}
-  if(!['sum','avg','bar'].includes(w.kind))w.field='';
+  const fieldKinds=['sum','avg','bar','pie','donut'];
+  if(fieldKinds.includes(w.kind)&&!w.field){notice('ERR','Pick a field for this widget'+(['sum','avg'].includes(w.kind)?' — add a Number field in Data Tools if the list is empty.':'.'));return}
+  if(!fieldKinds.includes(w.kind))w.field='';
   const ff=v('wfField');
   if(ff){
     const fv=v('wfValue');
     if(!String(fv).trim()){notice('ERR','The filter needs a value — or set the filter field back to “no filter”.');return}
     w.filter={field:ff,operator:v('wfOp')||'equals',value:fv};
   }
-  if(!w.title)w.title=w.kind==='bar'?`${{roles:'Roles',people:'People',candidates:'Slate rows'}[w.source]} by ${w.field}`
+  if(!w.title)w.title=['bar','pie','donut'].includes(w.kind)?`${{roles:'Roles',people:'People',candidates:'Slate rows'}[w.source]} by ${w.field}`
     :w.kind==='sum'?`Total ${w.field}`:w.kind==='avg'?`Average ${w.field}`
     :w.kind==='percent'?`% of ${{roles:'roles',people:'people',candidates:'slate rows'}[w.source]}`
     :`${{roles:'Roles',people:'People',candidates:'Slate rows'}[w.source]} count`;
@@ -3189,7 +3297,7 @@ document.addEventListener('change',e=>{
 Object.assign(window.__APP__,{makeXlsx,readXlsx,makeZip,unzip,workbookSheets,rowsToCsvText,exportXlsxWorkbook,parseFullDbText,fullDbToImportInputs,importFilesFlow,buildScopedData,openShareDrawer,chessGoTo,chessNav,chessRoleGroups,
   openDataTools,saveDataTools,allowedTypesFor,fieldTypeOf,allExtraFieldNames,reviewFromWorkbookBuffer,convertedCsvFromReview,openImportReview,
   treeZoomBy,fitTreeView,initTreeView,
-  openWidgetDrawer,saveWidget,removeWidget,computeWidget,widgetFieldType,operatorChoicesFor,ruleFieldType,
+  openWidgetDrawer,saveWidget,removeWidget,computeWidget,widgetFieldType,operatorChoicesFor,ruleFieldType,typedValueError,donutSvg,widgetNumericChoices,
   buildWorkbookBytes:()=>makeXlsx(workbookSheets()),
   importXlsxBuffer:async(buf,name)=>{const sheets=await readXlsx(buf);const texts=[];const notes=[];sheets.forEach(sh=>{if(!sh.rows.length)return;const type=detectSheetType(sh.rows[0].map(normalizeHeader));if(type&&type!=='FULL')texts.push({name:(name||'workbook.xlsx')+' ▸ '+sh.name,text:rowsToCsvText(sh.rows)});else notes.push({file:sh.name,severity:'INFO',problem:'Sheet skipped',action:''})});startSheetImport(texts,{notes})},
   importFullDbText:(name,text)=>{const inputs=fullDbToImportInputs(name,text);if(inputs)startSheetImport(inputs.texts,inputs.extras)},

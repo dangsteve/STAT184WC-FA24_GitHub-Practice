@@ -1611,9 +1611,9 @@ function parseCsvRows(text) {
     await page.evaluate(() => __APP__.openPersonDrawer('P001'));
     const kinds = await page.evaluate(() => {
       const get = k => [...document.querySelectorAll('#drawerBody .extraField')].find(x => x.dataset.extraKey === k);
-      return { bonus: get('Bonus Target')?.type, remote: get('Remote OK')?.tagName };
+      return { bonus: get('Bonus Target')?.dataset.ftype, remote: get('Remote OK')?.tagName };
     });
-    assertEq(kinds.bonus, 'number', 'number field renders a number input');
+    assertEq(kinds.bonus, 'number', 'number field renders a typed input');
     assertEq(kinds.remote, 'SELECT', 'boolean field renders a true/false select');
     await page.evaluate(() => {
       [...document.querySelectorAll('#drawerBody .extraField')].find(x => x.dataset.extraKey === 'Bonus Target').value = '60';
@@ -1811,7 +1811,104 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     19. SCREENSHOTS for the report
+     19. TYPED BUILT-INS, RANGES, PIE/DONUT
+     =================================================================== */
+  section('19. Typed built-ins, dash-ranges, pie/donut');
+  await test('dash-ranges count as numeric; letters never do', async () => {
+    await loadBase(page);
+    const r = await page.evaluate(() => {
+      __APP__.fieldTypes.Band = { type: 'number', on: 'person' };
+      const t = x => __APP__.typedValueError('Band', x);
+      return { plain: t('42'), range: t('2-5'), decimal: t('3.5 - 4.5'), neg: t('-3'), letters: t('2a'), word: t('Boston') };
+    });
+    assert(r.plain === null && r.range === null && r.decimal === null && r.neg === null, 'numbers and ranges pass: ' + JSON.stringify(r));
+    assert(r.letters && r.word, 'letters rejected');
+  });
+  await test('+ Add field asks for the type; numeric field validates on save', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openPersonDrawer('P001'));
+    await page.click('[data-action="addExtraField"]');
+    await page.waitForSelector('#smallValueInput');
+    await page.fill('#smallValueInput', 'Travel %');
+    await setSelect(page, 'smallValueType', 'number');
+    await page.click('#smallAdd');
+    const ft = await page.evaluate(() => __APP__.fieldTypes['Travel %']);
+    assertEq(ft.type, 'number', 'type registered from the modal');
+    assertEq(ft.on, 'person', 'scoped to the drawer kind');
+    await page.evaluate(() => { [...document.querySelectorAll('#drawerBody .extraField')].find(x => x.dataset.extraKey === 'Travel %').value = 'lots'; });
+    await page.click('#drawerSave');
+    assert((await lastMsg(page)).message.includes('Travel %'), 'letters blocked on save');
+    await page.evaluate(() => { [...document.querySelectorAll('#drawerBody .extraField')].find(x => x.dataset.extraKey === 'Travel %').value = '10-20'; });
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.people.find(p => p.id === 'P001')._x['Travel %']), '10-20', 'range value saved');
+  });
+  await test('built-in field re-types to Number when the data allows; locked otherwise', async () => {
+    await loadBase(page);
+    // on real data, readiness contains words -> locked
+    const locked = await page.evaluate(() => __APP__.allowedTypesFor('readiness'));
+    assert(!locked.number, 'readiness locked while values are words');
+    // clean dataset where readiness is numeric/ranges
+    const headers = 'recordType,personId,personName,readiness,roleId,roleTitle,level,successorRoleId,ranking';
+    const csv = [headers,
+      'PERSON,PA,Ann Num,2-5,,,,,', 'PERSON,PB,Bob Num,3,,,,,',
+      'ROLE,,,,RA,Role A,VP,,', 'SUCCESSOR,PA,,2-5,SA,,,RA,1',
+    ].join('\n');
+    await loadBase(page, csv);
+    assert((await page.evaluate(() => __APP__.allowedTypesFor('readiness'))).number, 'numeric readiness unlocks Number');
+    await page.evaluate(() => __APP__.openDataTools());
+    await page.evaluate(() => { [...document.querySelectorAll('.ftType')].find(s => s.dataset.field === 'readiness').value = 'number'; });
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.ruleFieldType('readiness')), 'number', 'readiness is now numeric');
+    // rule builder offers greater/less-than for readiness now
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    const ops = await page.evaluate(() => [...document.querySelectorAll('#conditionRows .condOperator option')].map(o => o.value));
+    assert(ops.includes('greater than'), 'numeric ops available on readiness');
+    await clickAction(page, 'closeDrawer');
+    // person form renders a typed input and validates
+    await page.evaluate(() => __APP__.openPersonDrawer('PA'));
+    assertEq(await page.evaluate(() => document.getElementById('pReady').dataset.ftype), 'number', 'readiness input is typed');
+    await typeInto(page, 'pReady', 'soon');
+    await page.click('#drawerSave');
+    assert((await lastMsg(page)).message.includes('readiness'), 'letters blocked in built-in field');
+    await typeInto(page, 'pReady', '1-2');
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.people.find(p => p.id === 'PA').readiness), '1-2', 'range saved');
+    // and the registry does not leak built-ins into Additional Fields
+    await page.evaluate(() => __APP__.openPersonDrawer('PB'));
+    const extraKeys = await page.evaluate(() => [...document.querySelectorAll('#drawerBody .extraField')].map(x => x.dataset.extraKey));
+    assert(!extraKeys.includes('readiness'), 'built-in not duplicated as an extra field');
+    await clickAction(page, 'closeDrawer');
+  });
+  await test('pie and donut widgets: top-5 + Other, correct math, legend, persistence', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openWidgetDrawer());
+    await setSelect(page, 'wKind', 'donut');
+    await page.evaluate(() => { document.getElementById('wField').value = 'department'; });
+    await page.click('#drawerSave');
+    const c = await page.evaluate(() => __APP__.computeWidget(__APP__.insightWidgets[0]));
+    assertEq(c.total, 72, 'donut covers all roles');
+    assert(c.slices.length <= 6, 'at most 5 slices + Other');
+    assert(c.slices.some(s => s[0] === 'Other'), '7 departments fold into Other');
+    assertEq(c.slices.reduce((a, s) => a + s[1], 0), c.total, 'slice counts sum to total');
+    await page.evaluate(() => { __APP__.activeTab = 'INSIGHTS'; __APP__.render(); });
+    const svg = await page.evaluate(() => {
+      const card = document.querySelector('.insight-card svg');
+      return { arcs: card.querySelectorAll('path,circle').length, center: card.querySelector('text')?.textContent, legend: [...document.querySelectorAll('.insight-card')][0].textContent };
+    });
+    assert(svg.arcs >= 6, 'slices rendered');
+    assertEq(svg.center, '72', 'donut center shows the total');
+    assert(svg.legend.includes('Other'), 'legend labels every slice');
+    // pie variant has no centre hole/total
+    await page.evaluate(() => { __APP__.insightWidgets.push({ id: 'WPIE', title: 'Pie', source: 'people', kind: 'pie', field: 'location', filter: null }); __APP__.render(); });
+    const pie = await page.evaluate(() => [...document.querySelectorAll('.insight-card svg')].map(s => !!s.querySelector('text')));
+    assertEq(JSON.stringify(pie), JSON.stringify([true, false]), 'donut has a centre total, pie does not');
+    const csv = await csvOf(page);
+    await loadBase(page, csv);
+    assertEq(await page.evaluate(() => __APP__.insightWidgets.length), 2, 'pie/donut widgets survive round-trip');
+  });
+
+  /* ===================================================================
+     20. SCREENSHOTS for the report
      =================================================================== */
   section('13. Screenshots');
   await test('capture UI screenshots', async () => {
