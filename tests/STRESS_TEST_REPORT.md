@@ -1,6 +1,6 @@
 # Succession Planner — Stress Test Report
 
-**Result: 130 / 130 automated scenarios pass, zero console errors.**
+**Result: 133 / 133 automated scenarios pass, zero console errors.**
 
 The suite (`tests/stress_test.cjs`) drives the real app in headless Chromium via
 Playwright — it clicks the actual buttons, opens the actual drawers, and fires real
