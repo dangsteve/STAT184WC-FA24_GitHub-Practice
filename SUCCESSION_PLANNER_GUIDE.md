@@ -155,8 +155,13 @@ CSV and become available everywhere, including rule builders and filters.
   workbook with People / Roles / Candidates / Boards tabs (plus a view-only
   Rules tab) — nice for reading and for HR to edit. Bring it back with
   ⋯ → *Import & merge* or just drag the .xlsx onto the app; the same review +
-  error report applies. No extra software is bundled — the app reads and writes
-  xlsx itself.
+  error report applies. **Import accepts exactly the layout Export writes** —
+  and if you're building a file from scratch, ⋯ → *Download sample Excel
+  workbook* gives you a small example with those exact tabs and headers
+  (example rows included, ready to replace with your own). The same button
+  lives inside Data Tools next to Import & merge, beside the sample CSV
+  sheets. No extra software is bundled — the app reads and writes xlsx
+  itself.
 - **Share one board — or several.** ⋯ → *Share / export a board* exports
   **Everything** by default; flip the switch off and tick exactly the board
   tabs you want to hand over (their roles, the people on those slates, nothing

@@ -2582,6 +2582,32 @@ function parseCsvRows(text) {
     await page.evaluate(() => __APP__.closeDrawer());
   });
 
+  await test('sample Excel workbook: offered in menu + Data Tools, and imports back cleanly (format proof)', async () => {
+    await loadBase(page);
+    assert(await page.evaluate(() => !!document.querySelector('#moreMenu [data-action="downloadSampleXlsx"]')), 'menu item exists');
+    await page.evaluate(() => __APP__.openDataTools());
+    assert(await page.evaluate(() => !!document.querySelector('#drawerBody [data-action="downloadSampleXlsx"]') && !!document.querySelector('#drawerBody [data-action="downloadSheetTemplates"]')), 'sample Excel + sample CSV buttons inside Import & merge');
+    await page.evaluate(() => __APP__.closeDrawer());
+    const res = await page.evaluate(async () => {
+      const bytes = __APP__.makeXlsx(__APP__.workbookSheets(__APP__.sampleWorkbookData()));
+      const sheets = await __APP__.readXlsx(bytes.buffer);
+      const types = {};
+      sheets.forEach(sh => { types[sh.name] = __APP__.detectSheetType(sh.rows[0].map(__APP__.normalizeHeader)); });
+      await __APP__.importXlsxBuffer(bytes.buffer, 'succession_sample_workbook.xlsx');
+      const rv = __APP__.importReview;
+      return { types, stats: rv ? rv.stats : null, errors: rv ? rv.report.filter(r => r.severity === 'ERROR').length : -1 };
+    });
+    assertEq(res.types['People'], 'PEOPLE', 'People tab recognized');
+    assertEq(res.types['Roles'], 'ROLES', 'Roles tab recognized');
+    assertEq(res.types['Candidates'], 'SLATE', 'Candidates tab recognized');
+    assertEq(res.types['Boards'], 'BOARDS', 'Boards tab recognized');
+    assertEq(res.errors, 0, 'the sample imports with zero errors — the format matches exactly');
+    assertEq(res.stats.peopleAdded, 2, 'both example people staged');
+    assertEq(res.stats.rolesAdded, 2, 'both example roles staged');
+    assertEq(res.stats.slateAdded, 1, 'the example slate row staged');
+    await page.click('[data-action="importCancel"]');
+  });
+
   /* ===================================================================
      24. SCREENSHOTS for the report
      =================================================================== */

@@ -400,6 +400,7 @@ html[data-theme="ocean"]{--primary:#0e7490;--primary-700:#0b5c73;--primary-50:#e
           <button data-action="exportXlsx">Export Excel workbook (.xlsx)</button>
           <button data-action="downloadTemplate">Download starter template</button>
           <button data-action="downloadSheetTemplates">Download simple sheet templates</button>
+          <button data-action="downloadSampleXlsx">Download sample Excel workbook</button>
           <div class="sep"></div>
           <button data-action="dataTools">Data Tools&hellip;</button>
           <div class="sep"></div>
@@ -2531,7 +2532,7 @@ const LOCK_ACTIONS={
   openPersonDrawerNew:'addPeople',
   deletePerson:'del',deleteRole:'del',
   approveSucc:'moves',approveTop:'moves',autoMove:'moves',chessTakeSeat:'moves',
-  dataTools:'tools',importSheets:'tools',downloadSheetTemplates:'tools',
+  dataTools:'tools',importSheets:'tools',downloadSheetTemplates:'tools',downloadSampleXlsx:'tools',
 };
 document.addEventListener('click',e=>{
   const elm=e.target.closest('[data-action]');
@@ -3234,6 +3235,28 @@ function exportXlsxWorkbook(){
   downloadBytes('succession_planner_workbook.xlsx',makeXlsx(workbookSheets()),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   notice('OK','Excel workbook exported — People / Roles / Candidates / Boards tabs. Edit it and Import & merge it back.');
 }
+/* a tiny example workbook in EXACTLY the layout Export writes and Import understands */
+function sampleWorkbookData(){
+  return{
+    boards:[{id:'BOARD-SAMPLE',name:'Sample Board'}],
+    people:[
+      {id:'P-EX-1',name:'Jordan Example',title:'Director of Ops',department:'Operations',email:'jordan@example.com',location:'Austin',jobLevel:'Director',performance:'High',potential:'High',retentionRisk:'Low',mobility:'Yes',criticalExperience:'Scaling teams',skills:'Leadership; Planning',readiness:'Ready Now',source:'Internal',candidateType:'Successor',confidence:'High',notes:'Example person — replace these rows with your own'},
+      {id:'P-EX-2',name:'Casey Sample',title:'Senior Ops Manager',department:'Operations',email:'casey@example.com',location:'Denver',jobLevel:'Manager',performance:'Medium',potential:'High',retentionRisk:'Medium',mobility:'Unknown',criticalExperience:'',skills:'Analytics',readiness:'1-2 Years',source:'Internal',candidateType:'Athlete',confidence:'Medium',notes:'Person ID is optional on import — one is generated from the name'},
+    ],
+    roles:[
+      {id:'R-EX-VP',title:'VP of Operations',level:'VP',department:'Operations',boardId:'BOARD-SAMPLE',managerRoleId:'',incumbentPersonId:'P-EX-1',incumbentName:'Jordan Example',risk:'Medium',criticality:'High',owner:'HR Lead',status:'Active Plan',sortOrder:1},
+      {id:'R-EX-DIR',title:'Director of Ops',level:'Director',department:'Operations',boardId:'BOARD-SAMPLE',managerRoleId:'R-EX-VP',incumbentPersonId:'',incumbentName:'VACANT',risk:'High',criticality:'Medium',owner:'HR Lead',status:'Active Plan',sortOrder:2},
+    ],
+    successors:[
+      {roleId:'R-EX-VP',personId:'P-EX-2',ranking:1,readiness:'1-2 Years',source:'Internal',candidateType:'Athlete',confidence:'Medium',notes:'Role and Person also accept plain names instead of IDs',approved:false,autoMoveQueued:false},
+    ],
+    rules:[],history:[],customFieldValues:{},
+  };
+}
+function downloadSampleXlsx(){
+  downloadBytes('succession_sample_workbook.xlsx',makeXlsx(workbookSheets(sampleWorkbookData())),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  notice('OK','Sample workbook downloaded — the exact tabs and headers Import & merge understands (the same layout Export writes). Replace the example rows with your data and import it back.');
+}
 
 /* ---------- full-database merge (for shared files coming back) ---------- */
 function parseFullDbText(text){
@@ -3463,7 +3486,7 @@ function openDataTools(){
   openDrawer('Data Tools','Everything for moving data in and out, plus custom field types.',
     `<div class="rule-section"><h3>Import &amp; Share</h3>
       <div class="choice-grid">
-        <div class="choice-card"><h3>Import &amp; merge</h3><div class="hint">Bring in simple sheets, Excel workbooks or returned planner CSVs. Everything goes through a review with an error report before anything is applied.</div><div style="margin-top:10px"><button class="btn btn-primary" data-action="importSheets">Import &amp; merge (CSV / Excel)&hellip;</button></div></div>
+        <div class="choice-card"><h3>Import &amp; merge</h3><div class="hint">Takes <b>.csv and .xlsx</b> — an Excel workbook in the same tab layout Export writes (People / Roles / Candidates / Boards) merges straight in. Everything goes through a review with an error report before anything is applied.</div><div style="margin-top:10px"><button class="btn btn-primary" data-action="importSheets">Import &amp; merge (CSV / Excel)&hellip;</button></div><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-quiet btn-sm" data-action="downloadSampleXlsx">Sample Excel workbook</button><button class="btn btn-quiet btn-sm" data-action="downloadSheetTemplates">Sample CSV sheets</button></div></div>
         <div class="choice-card"><h3>Share / export a board</h3><div class="hint">Export one board (or everything) as a planner CSV or Excel workbook to hand to someone else, then merge their changes back.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="shareExport">Share / export&hellip;</button></div></div>
       </div></div>
     <div class="rule-section"><h3>File Converters</h3><div class="hint" style="margin-bottom:10px">HR can convert a file here and upload the result later — nothing is imported into what&rsquo;s currently open.</div>
@@ -3692,6 +3715,7 @@ function removeWidget(id){
 }
 Object.assign(ACTIONS,{
   exportXlsx:()=>{el('moreMenu').classList.remove('open');exportXlsxWorkbook()},
+  downloadSampleXlsx:()=>{el('moreMenu').classList.remove('open');downloadSampleXlsx()},
   shareExport:()=>{el('moreMenu').classList.remove('open');openShareDrawer()},
   importSheets:()=>{el('moreMenu').classList.remove('open');pickImportFiles()},
   dataTools:()=>{el('moreMenu').classList.remove('open');openDataTools()},
@@ -3747,7 +3771,7 @@ document.addEventListener('change',e=>{
   if(t.id==='wSource'||t.id==='wKind')return openWidgetDrawer({title:v('wTitle'),source:v('wSource'),kind:v('wKind')});
   if(t.id==='wfField')return updateWidgetFilterControls();
 });
-Object.assign(window.__APP__,{makeXlsx,readXlsx,makeZip,unzip,workbookSheets,rowsToCsvText,exportXlsxWorkbook,parseFullDbText,fullDbToImportInputs,importFilesFlow,buildScopedData,openShareDrawer,chessGoTo,chessNav,chessRoleGroups,
+Object.assign(window.__APP__,{makeXlsx,readXlsx,makeZip,unzip,workbookSheets,rowsToCsvText,exportXlsxWorkbook,sampleWorkbookData,downloadSampleXlsx,parseFullDbText,fullDbToImportInputs,importFilesFlow,buildScopedData,openShareDrawer,chessGoTo,chessNav,chessRoleGroups,
   openDataTools,saveDataTools,allowedTypesFor,fieldTypeOf,allExtraFieldNames,reviewFromWorkbookBuffer,convertedCsvFromReview,openImportReview,
   treeZoomBy,fitTreeView,initTreeView,
   openWidgetDrawer,saveWidget,removeWidget,computeWidget,widgetFieldType,operatorChoicesFor,ruleFieldType,typedValueError,donutSvg,widgetNumericChoices,
@@ -3776,7 +3800,7 @@ function buildProgramCopy(locks){
   if(!SOURCE_SNAPSHOT.includes(needle))return null;
   return SOURCE_SNAPSHOT.replace(needle,decl+JSON.stringify(locks||{})+';'+mark);
 }
-if(locked('tools'))document.querySelectorAll('[data-action="dataTools"],[data-action="importSheets"],[data-action="downloadSheetTemplates"]').forEach(x=>x.style.display='none');
+if(locked('tools'))document.querySelectorAll('[data-action="dataTools"],[data-action="importSheets"],[data-action="downloadSheetTemplates"],[data-action="downloadSampleXlsx"]').forEach(x=>x.style.display='none');
 render();
 checkBackup().then(()=>{if(!roles.length&&!people.length)setStatus('Ready — open your CSV database or add records.')});
 Object.assign(window.__APP__,{buildProgramCopy,locked,lockNotice,filterValueChoices,customFilterFields,fillFilters,passesFilters});
