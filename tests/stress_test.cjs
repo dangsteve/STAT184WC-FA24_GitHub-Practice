@@ -542,12 +542,12 @@ function parseCsvRows(text) {
     await typeInto(page, 'ruleId', 'RULE-BLOCK-T');
     await typeInto(page, 'ruleName', 'Test Block');
     await setSelect(page, 'ruleType', 'BLOCK');
-    await setSelect(page, 'rulePerson', t.pid);
-    await page.evaluate(rid => {
-      const cb = [...document.querySelectorAll('.blockTargetCheck')].find(c => c.value === rid);
+    await page.evaluate(t => {
+      [...document.querySelectorAll('.blockPersonCheck')].find(c => c.value === t.pid).click();
+      const cb = [...document.querySelectorAll('.blockTargetCheck')].find(c => c.value === t.roleId);
       if (!cb) throw new Error('target role checkbox not found');
       cb.click();
-    }, t.roleId);
+    }, t);
     await page.click('#drawerSave');
     assert(await page.evaluate(() => __APP__.rules.some(r => r.id === 'RULE-BLOCK-T')), 'rule saved');
     await page.evaluate(sid => __APP__.approveSuccessor(sid), t.sid);
@@ -566,7 +566,7 @@ function parseCsvRows(text) {
     await page.evaluate(() => __APP__.openRuleDrawer());
     await typeInto(page, 'ruleId', 'RULE-BLOCK-T2');
     await setSelect(page, 'ruleType', 'BLOCK');
-    await setSelect(page, 'rulePerson', t.pid);
+    await page.evaluate(pid => [...document.querySelectorAll('.blockPersonCheck')].find(c => c.value === pid).click(), t.pid);
     await setSelect(page, 'ruleBlockOperator', 'cannot change role');
     await page.click('#drawerSave');
     await page.evaluate(sid => __APP__.approveSuccessor(sid), t.sid);
@@ -2036,7 +2036,7 @@ function parseCsvRows(text) {
     await page.evaluate(() => __APP__.openRuleDrawer());
     await typeInto(page, 'ruleId', 'RULE-MULTI');
     await setSelect(page, 'ruleType', 'BLOCK');
-    await setSelect(page, 'rulePerson', pid);
+    await page.evaluate(pid => [...document.querySelectorAll('.blockPersonCheck')].find(c => c.value === pid).click(), pid);
     await typeInto(page, 'ruleMsg', 'MULTI-TARGET-HIT');
     await page.evaluate(() => {
       ['R-CEO', 'R-CFO'].forEach(rid => [...document.querySelectorAll('.blockTargetCheck')].find(c => c.value === rid).click());
@@ -2060,7 +2060,7 @@ function parseCsvRows(text) {
     await page.evaluate(() => __APP__.openRuleDrawer());
     await typeInto(page, 'ruleId', 'RULE-NOTARGET');
     await setSelect(page, 'ruleType', 'BLOCK');
-    await setSelect(page, 'rulePerson', pid);
+    await page.evaluate(pid => [...document.querySelectorAll('.blockPersonCheck')].find(c => c.value === pid).click(), pid);
     await page.click('#drawerSave');
     assert(await page.evaluate(() => !__APP__.rules.some(r => r.id === 'RULE-NOTARGET')), 'not saved');
     const msg = await lastMsg(page);
@@ -2348,10 +2348,10 @@ function parseCsvRows(text) {
       ths: document.querySelectorAll('#mainView thead th').length,
       txt: document.querySelector('#mainView thead').textContent,
     }));
-    assertEq(on.ths, before.ths + 2, 'exactly two columns added');
-    assert(on.txt.includes('Roles They’re In') && on.txt.includes('Tabs'), 'the two new columns are Roles and Tabs');
+    assertEq(on.ths, before.ths + 3, 'exactly three columns added');
+    assert(on.txt.includes('Current Role') && on.txt.includes('Candidate For') && on.txt.includes('Tabs'), 'the new columns are Current Role / Candidate For / Tabs');
     const check = await page.evaluate(() => {
-      // pick someone who holds a seat AND sits on a slate, and verify the cells
+      // pick someone who holds a seat AND sits on a slate, and verify the split cells
       const p = __APP__.people.find(x => __APP__.roles.some(r => r.incumbentPersonId === x.id) && __APP__.successors.some(s => s.personId === x.id));
       if (!p) return { skip: true };
       const row = document.querySelector(`#mainView tr[data-person-id="${p.id}"]`);
@@ -2360,11 +2360,12 @@ function parseCsvRows(text) {
       const slateRole = __APP__.roles.find(r => r.id === __APP__.successors.find(s => s.personId === p.id).roleId);
       const tabName = (__APP__.boards.find(b => b.id === (seat.boardId || slateRole.boardId)) || {}).name;
       return {
-        rolesCell: cells.some(c => c.includes(seat.title + ' (seat)') && (!slateRole || c.includes(slateRole.title))),
+        seatCell: cells.some(c => c.includes(seat.title)),
+        candCell: cells.some(c => c.includes(slateRole.title)),
         tabCell: !tabName || cells.some(c => c.includes(tabName)),
       };
     });
-    if (!check.skip) { assert(check.rolesCell, 'seat role marked "(seat)" and slate roles listed'); assert(check.tabCell, 'their board tabs listed'); }
+    if (!check.skip) { assert(check.seatCell, 'Current Role shows the seat'); assert(check.candCell, 'Candidate For shows the slate roles'); assert(check.tabCell, 'Tabs shows their boards'); }
     assertEq(await csvOf(page), csvBefore, 'toggling the view flag never changes the CSV');
     assertEq((await counts(page)).dirty, false, 'and never marks the data unsaved');
     await page.reload();
@@ -2606,6 +2607,122 @@ function parseCsvRows(text) {
     assertEq(res.stats.rolesAdded, 2, 'both example roles staged');
     assertEq(res.stats.slateAdded, 1, 'the example slate row staged');
     await page.click('[data-action="importCancel"]');
+  });
+
+  await test('one BLOCK rule covers several people at once; person-ID rename keeps the list intact', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => ({ p1: __APP__.people[0].id, p2: __APP__.people[1].id, p3: __APP__.people[2].id, roleId: 'R-CEO' }));
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-MULTIP');
+    await setSelect(page, 'ruleType', 'BLOCK');
+    await typeInto(page, 'ruleMsg', 'MULTI-PERSON-HIT');
+    await page.evaluate(t => {
+      [t.p1, t.p2].forEach(pid => [...document.querySelectorAll('.blockPersonCheck')].find(c => c.value === pid).click());
+      [...document.querySelectorAll('.blockTargetCheck')].find(c => c.value === t.roleId).click();
+    }, t);
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.rules.find(r => r.id === 'RULE-MULTIP').personId), `${t.p1}|${t.p2}`, 'both people saved as a pipe list');
+    const v = await page.evaluate(t => {
+      const mk = pid => ({ roleId: t.roleId, personId: pid, readiness: 'Ready Now', source: 'Internal', confidence: 'High' });
+      const hit = pid => __APP__.evaluateRules(mk(pid)).blocks.some(m => m.includes('MULTI-PERSON-HIT'));
+      return { a: hit(t.p1), b: hit(t.p2), c: hit(t.p3) };
+    }, t);
+    assert(v.a && v.b, 'both listed people are blocked');
+    assert(!v.c, 'anyone not listed moves freely');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'RULE' && r.rulePersonId === `${t.p1}|${t.p2}`), 'pipe list persisted to CSV');
+    // rename one of the blocked people through the drawer — the rule list must follow
+    await page.evaluate(pid => __APP__.openPersonDrawer(pid), t.p1);
+    await typeInto(page, 'pId', 'P-RENAMED-BLK');
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.rules.find(r => r.id === 'RULE-MULTIP').personId), `P-RENAMED-BLK|${t.p2}`, 'rename migrated inside the pipe list');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('Open CSV / Excel: the Open button reads a whole workbook as the database', async () => {
+    await loadBase(page);
+    assert((await page.evaluate(() => document.querySelector('[data-action="openCSV"]').textContent)).includes('Excel'), 'button says Open CSV / Excel');
+    const res = await page.evaluate(async () => {
+      const bytes = __APP__.makeXlsx(__APP__.workbookSheets(__APP__.sampleWorkbookData()));
+      const ok = await __APP__.openWorkbookAsDatabase(bytes.buffer, 'my_plan.xlsx');
+      return { ok, people: __APP__.people.length, roles: __APP__.roles.length, status: document.getElementById('dbStatus').textContent, msg: __APP__.messages[0].message };
+    });
+    assert(res.ok, 'workbook opened');
+    assertEq(res.people, 2, 'people loaded from the workbook');
+    assertEq(res.roles, 2, 'roles loaded from the workbook');
+    assert(res.status.includes('my_plan.xlsx'), 'file name shown');
+    assert(res.msg.includes('Save will ask'), 'explains the database stays CSV');
+  });
+  await test('Export asks: CSV or Excel', async () => {
+    await loadBase(page);
+    await page.click('[data-action="exportChooser"]');
+    assert(await page.evaluate(() => !!document.querySelector('[data-action="exportCSVGo"]') && !!document.querySelector('[data-action="exportXlsxGo"]')), 'both choices offered');
+    await page.click('[data-action="exportCSVGo"]');
+    assert(await page.evaluate(() => !document.getElementById('drawer').classList.contains('open')), 'downloads and closes');
+    await page.click('[data-action="exportChooser"]');
+    await page.click('[data-action="exportXlsxGo"]');
+    const msg = await lastMsg(page);
+    assert(msg.message.includes('Excel workbook exported'), 'Excel path works from the chooser');
+  });
+  await test('candidates column picker: Name + up to 4, flag columns excluded, custom fields need a value, persists', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
+    const headTxt = () => page.evaluate(() => document.querySelector('#mainView thead').textContent);
+    assert((await headTxt()).includes('Title') && (await headTxt()).includes('Slates'), 'default columns show');
+    await page.click('[data-action="peopleColsOpen"]');
+    const pop = await page.evaluate(() => ({
+      labels: [...document.querySelectorAll('.pcolCheck')].map(c => c.value),
+      disabled: [...document.querySelectorAll('.pcolCheck:not(:checked)')].every(c => c.disabled),
+      checked: [...document.querySelectorAll('.pcolCheck:checked')].length,
+    }));
+    assertEq(pop.checked, 4, 'four columns picked by default');
+    assert(pop.disabled, 'at the cap of 4 every unchecked box is disabled');
+    assert(!pop.labels.some(l => ['Current Role', 'Candidate For', 'Tabs'].includes(l)), 'flag columns are not offered in the picker');
+    // swap Title out for Location — the popover stays open across re-renders
+    await page.evaluate(() => [...document.querySelectorAll('.pcolCheck')].find(c => c.value === 'title').click());
+    await page.evaluate(() => [...document.querySelectorAll('.pcolCheck')].find(c => c.value === 'location').click());
+    const t2 = await headTxt();
+    assert(!t2.includes('Title') && t2.includes('Location'), 'columns swapped');
+    // custom person field appears in the picker only once someone has a value
+    assert(!(await page.evaluate(() => [...document.querySelectorAll('.pcolCheck')].some(c => c.value === 'Badge Level'))), 'no value → not offered');
+    await page.evaluate(() => { __APP__.people[0]._x = { ...(__APP__.people[0]._x || {}), 'Badge Level': 'Gold' }; __APP__.render(); });
+    assert(await page.evaluate(() => [...document.querySelectorAll('.pcolCheck')].some(c => c.value === 'Badge Level')), 'offered once a candidate has a value');
+    await page.click('body', { position: { x: 5, y: 5 } });
+    await page.reload();
+    await page.waitForFunction(() => window.__APP__ && __APP__.people.length > 0);
+    await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
+    const t3 = await headTxt();
+    assert(t3.includes('Location') && !t3.includes('Title'), 'column choice remembered per browser');
+    await page.evaluate(() => { localStorage.removeItem('succession_planner_people_cols_v1'); }); // reset for later tests
+  });
+  await test('Back button walks the drawer chain (person → role → back; Data Tools → Share → back)', async () => {
+    await loadBase(page);
+    const pid = await page.evaluate(() => __APP__.successors[0].personId);
+    await page.evaluate(p => __APP__.openPersonDrawer(p), pid);
+    assert(await page.evaluate(() => document.getElementById('backBtn').style.display === 'none'), 'fresh drawer has no Back');
+    await page.click('#drawerBody [data-action="openRole"]');
+    assert(await page.evaluate(() => document.getElementById('backBtn').style.display !== 'none'), 'role drawer opened from the person shows ← Back');
+    await page.click('#backBtn');
+    const back = await page.evaluate(pid => ({ title: document.getElementById('drawerTitle').textContent, name: __APP__.people.find(p => p.id === pid).name }), pid);
+    assertEq(back.title, back.name, 'Back returns to the same person');
+    await page.evaluate(() => __APP__.closeDrawer());
+    await page.evaluate(() => __APP__.openDataTools());
+    await page.click('#drawerBody [data-action="shareExport"]');
+    assert(await page.evaluate(() => document.getElementById('drawerTitle').textContent.includes('Share')), 'share drawer opened');
+    assert(await page.evaluate(() => document.getElementById('backBtn').style.display !== 'none'), 'share drawer shows ← Back');
+    await page.click('#backBtn');
+    assert(await page.evaluate(() => document.getElementById('drawerTitle').textContent.includes('Data Tools')), 'Back returns to Data Tools');
+    await page.evaluate(() => __APP__.closeDrawer());
+    await page.evaluate(() => __APP__.openShareDrawer());
+    assert(await page.evaluate(() => document.getElementById('backBtn').style.display === 'none'), 'closing ended the chain — no stale Back');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('role form says "Reports To" and drives the org tree', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openRoleDrawer('R-CEO'));
+    const body = await page.evaluate(() => document.getElementById('drawerBody').textContent);
+    assert(body.includes('Reports To'), 'label renamed');
+    assert(body.includes('builds the Org Tree'), 'hint explains what it does');
+    await page.evaluate(() => __APP__.closeDrawer());
   });
 
   /* ===================================================================

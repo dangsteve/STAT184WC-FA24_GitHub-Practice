@@ -387,9 +387,9 @@ html[data-theme="ocean"]{--primary:#0e7490;--primary-700:#0b5c73;--primary-50:#e
       <span id="saveStatus">Ready</span>
     </div>
     <div class="toolbar">
-      <button class="btn btn-quiet" data-action="openCSV">Open CSV</button>
+      <button class="btn btn-quiet" data-action="openCSV" title="Open a planner CSV or an Excel workbook">Open CSV / Excel</button>
       <button class="btn btn-primary" data-action="saveCSV" title="Save to the opened CSV file (Ctrl+S)">Save</button>
-      <button class="btn btn-quiet" data-action="exportCSV" title="Download a copy of the CSV database">Export</button>
+      <button class="btn btn-quiet" data-action="exportChooser" title="Download a copy as CSV or Excel">Export</button>
       <button class="btn btn-green" data-action="addChooser">+ Add</button>
       <button class="btn btn-quiet" data-action="undo" title="Undo last change (Ctrl+Z)">Undo</button>
       <button class="btn btn-quiet" data-action="appearance" title="Appearance — themes and chess piece styles">&#127912;</button>
@@ -397,7 +397,6 @@ html[data-theme="ocean"]{--primary:#0e7490;--primary-700:#0b5c73;--primary-50:#e
         <button class="btn btn-quiet" data-action="toggleMenu" title="More actions">&#8943;</button>
         <div class="menu" id="moreMenu">
           <button data-action="manageTabs">Manage tabs&hellip;</button>
-          <button data-action="exportXlsx">Export Excel workbook (.xlsx)</button>
           <button data-action="downloadTemplate">Download starter template</button>
           <button data-action="downloadSheetTemplates">Download simple sheet templates</button>
           <button data-action="downloadSampleXlsx">Download sample Excel workbook</button>
@@ -460,7 +459,7 @@ html[data-theme="ocean"]{--primary:#0e7490;--primary-700:#0b5c73;--primary-50:#e
     <div class="drawer-actions">
       <div id="drawerLeft" style="display:flex;gap:8px;flex-wrap:wrap"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-quiet" id="backBtn" style="display:none" data-action="goBack">Back</button>
+        <button class="btn btn-quiet" id="backBtn" style="display:none" data-action="goBack">&larr; Back</button>
         <button class="btn btn-quiet" data-action="closeDrawer">Close</button>
         <button class="btn btn-primary" id="drawerSave">Save</button>
       </div>
@@ -537,12 +536,19 @@ function locked(k){return !!PROGRAM_LOCKS[k]}
 function anyLocks(){return Object.keys(LOCK_INFO).some(k=>PROGRAM_LOCKS[k])}
 function lockNotice(k){notice('WARN',(LOCK_INFO[k]||'This feature')+' is turned off in this shared copy of the planner.')}
 
-/* personal view flag: extra Roles/Tabs columns on the Candidates tab */
+/* personal view flag: extra Current Role / Candidate For / Tabs columns */
 const PEOPLE_WHERE_KEY='succession_planner_people_where_v1';
 let peopleShowWhere=false;try{peopleShowWhere=localStorage.getItem(PEOPLE_WHERE_KEY)==='1'}catch(e){}
+/* personal pick of Candidates-table columns (Name always shows) */
+const PEOPLE_COL_DEFS={title:'Title',department:'Department',location:'Location',readiness:'Readiness',candidateType:'Type',source:'Source',jobLevel:'Job Level',performance:'Performance',potential:'Potential',retentionRisk:'Retention Risk',mobility:'Mobility',confidence:'Confidence',email:'Email',skills:'Skills',slates:'Slates'};
+const PEOPLE_COLS_KEY='succession_planner_people_cols_v1';
+const PEOPLE_COLS_MAX=4; // plus Name — keeps the table readable
+let peopleCols=['title','department','readiness','slates'];
+try{const _pc=JSON.parse(localStorage.getItem(PEOPLE_COLS_KEY)||'null');if(Array.isArray(_pc)&&_pc.length)peopleCols=_pc.slice(0,PEOPLE_COLS_MAX)}catch(e){}
+let peopleColsPop=false;
 
 let boards=systemBoards(),roles=[],people=[],successors=[],rules=[],history=[],messages=[];
-let fileHandle=null,selectedPersonId='',backRoleId='',undoStack=[],importBaseline=null,currentDrawerPersonId='',customFieldValues={};
+let fileHandle=null,selectedPersonId='',undoStack=[],importBaseline=null,currentDrawerPersonId='',customFieldValues={};
 let activeTab='MASTER',dirty=false,backupTimer=null,automationDepth=0;
 let chess=null,chessSessionFields=null,chessDefaultFields=null,lastInferred=null;
 let bannerState={backup:null,fileName:''},reconnectHandle=null,importReview=null;
@@ -776,7 +782,17 @@ function handleCustomSelect(sel){
 function refreshOpenRuleValueControls(field){document.querySelectorAll('.condition-row').forEach(row=>{if(row.querySelector('.condField')?.value===field)updateConditionValue(row.querySelector('.condField'))})}
 
 /* ---------- drawer plumbing ---------- */
-function openDrawer(title,sub,body,save,left='',showBack=false){
+/* drawer navigation: every drawer opened from inside another drawer gets a
+   ← Back button that returns to the previous one (person → role → back, Data
+   Tools → Share → back, and so on). Closing the drawer ends the chain. */
+let drawerStack=[],drawerCurrent=null,drawerNavBack=false;
+function trackDrawer(key,open){
+  if(drawerNavBack){drawerCurrent={key,open};return}
+  if(drawerIsOpen()&&drawerCurrent&&drawerCurrent.key!==key){drawerStack.push(drawerCurrent);if(drawerStack.length>15)drawerStack.shift()}
+  else if(!drawerIsOpen())drawerStack=[];
+  drawerCurrent={key,open};
+}
+function openDrawer(title,sub,body,save,left=''){
   el('drawerTitle').textContent=title;
   el('drawerSub').textContent=sub;
   el('drawerBody').innerHTML=body;
@@ -784,12 +800,17 @@ function openDrawer(title,sub,body,save,left='',showBack=false){
   el('drawerSave').textContent='Save';
   el('drawerSave').onclick=save;
   el('drawerLeft').innerHTML=left;
-  el('backBtn').style.display=showBack?'inline-flex':'none';
+  el('backBtn').style.display=drawerStack.length?'inline-flex':'none';
   el('drawer').classList.add('open');
   el('drawerBody').scrollTop=0;
 }
-function closeDrawer(){el('drawer').classList.remove('open');backRoleId=''}
-function goBack(){if(backRoleId){const rid=backRoleId;backRoleId='';openRoleDrawer(rid)}else closeDrawer()}
+function closeDrawer(){el('drawer').classList.remove('open');drawerStack=[];drawerCurrent=null}
+function goBack(){
+  const prev=drawerStack.pop();
+  if(!prev){closeDrawer();return}
+  drawerNavBack=true;
+  try{prev.open()}finally{drawerNavBack=false}
+}
 function drawerIsOpen(){return el('drawer').classList.contains('open')}
 
 /* =====================================================================
@@ -896,8 +917,10 @@ function download(name,content,type){const blob=new Blob([content],{type});const
 async function openCSV(){
   if('showOpenFilePicker' in window){
     try{
-      [fileHandle]=await window.showOpenFilePicker({types:[{description:'CSV',accept:{'text/csv':['.csv']}}],multiple:false});
-      const f=await fileHandle.getFile();
+      const [h]=await window.showOpenFilePicker({types:[{description:'Planner CSV or Excel workbook',accept:{'text/csv':['.csv'],'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}],multiple:false});
+      const f=await h.getFile();
+      if(/\.xlsx$/i.test(f.name)){await openWorkbookAsDatabase(await f.arrayBuffer(),f.name);return}
+      fileHandle=h;
       if(loadCSV(await f.text())){
         el('dbStatus').textContent=f.name;
         bannerState.fileName='';bannerState.backup=null;renderBanners();
@@ -907,11 +930,25 @@ async function openCSV(){
     }catch(e){if(e&&e.name!=='AbortError')console.warn(e);setStatus('Open cancelled');return}
   }
   const input=document.createElement('input');
-  input.type='file';input.accept='.csv,text/csv';
-  input.onchange=async()=>{const f=input.files[0];if(f&&loadCSV(await f.text()))el('dbStatus').textContent=f.name};
+  input.type='file';input.accept='.csv,.xlsx,text/csv';
+  input.onchange=async()=>{
+    const f=input.files[0];if(!f)return;
+    if(/\.xlsx$/i.test(f.name)){await openWorkbookAsDatabase(await f.arrayBuffer(),f.name);return}
+    if(loadCSV(await f.text()))el('dbStatus').textContent=f.name;
+  };
   input.click();
 }
 function exportCSV(){download('succession_planner_database.csv',toCSV(),'text/csv');markClean('Exported CSV copy '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}
+function openExportChooser(){
+  trackDrawer('export',()=>openExportChooser());
+  openDrawer('Export a Copy','Download the whole database as a file.',
+    `<div class="choice-grid">
+      <div class="choice-card"><h3>Planner CSV</h3><div class="hint">The database file itself — open it again with Open CSV / Excel any time.</div><div style="margin-top:10px"><button class="btn btn-primary" data-action="exportCSVGo">Download CSV</button></div></div>
+      <div class="choice-card"><h3>Excel workbook</h3><div class="hint">People / Roles / Candidates / Boards tabs — easy to read and edit in Excel, and Import &amp; merge understands it as-is.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="exportXlsxGo">Download Excel (.xlsx)</button></div></div>
+    </div>`,
+    ()=>closeDrawer(),'');
+  el('drawerSave').style.display='none';
+}
 async function saveCSV(){
   const csv=toCSV();
   if(fileHandle&&'createWritable' in fileHandle){
@@ -1072,7 +1109,8 @@ function evaluateRules(s){
     let hit=false;
     if(rule.type==='BLOCK'){
       const old=currentRoleForPerson(s.personId),op=rule.operator||'cannot move to target role';
-      const personMatches=!rule.personId||rule.personId===s.personId;
+      const persons=String(rule.personId||'').split('|').filter(Boolean); // one or many blocked people
+      const personMatches=!persons.length||persons.includes(s.personId);
       const targets=String(rule.targetRoleId||'').split('|').filter(Boolean); // one or many target roles
       hit=op==='cannot change role'?(personMatches&&old&&old.id!==s.roleId):(personMatches&&targets.includes(s.roleId));
     }else if(rule.type==='FIELD_RULE'){
@@ -1506,37 +1544,51 @@ function applyInferredLines(){
 }
 
 /* ---------- people ---------- */
+function peopleColLabel(c){return PEOPLE_COL_DEFS[c]||c}
+function peopleColsPickerHtml(){
+  const custom=customFilterFields('piece').filter(f=>!(f in PEOPLE_COL_DEFS));
+  const avail=[...Object.keys(PEOPLE_COL_DEFS),...custom];
+  const item=c=>{const id=checkboxId();const on=peopleCols.includes(c);return `<label for="${id}"><input id="${id}" type="checkbox" class="pcolCheck" value="${attr(c)}" ${on?'checked':''} ${!on&&peopleCols.length>=PEOPLE_COLS_MAX?'disabled':''}>${esc(peopleColLabel(c))}</label>`};
+  return `<span class="fchip" style="border:none;background:none;margin-right:6px"><button type="button" class="btn btn-quiet btn-sm" data-action="peopleColsOpen">Columns &#9662;</button>${peopleColsPop?`<div class="fchip-pop" style="left:auto;right:0">
+    <div class="fchip-pop-head"><span>Name always shows — pick up to ${PEOPLE_COLS_MAX} more</span></div>
+    ${avail.map(item).join('')}
+    <div class="hint" style="margin-top:6px">Current Role / Candidate For / Tabs come from the switch, not this list. Custom fields appear once someone has a value.</div>
+  </div>`:''}</span>`;
+}
 function renderPeople(){
   const whereToggle=`<label class="switchline" id="peopleWhereSwitch" style="display:inline-flex;margin-right:10px"><input type="checkbox" class="switch" id="peopleWhereFlag" ${peopleShowWhere?'checked':''}> Show roles &amp; tabs</label>`;
-  setView('Candidates','Every person is stored once by Person ID — edits update all slates that reference them.',whereToggle+(locked('addPeople')?'':`<button class="btn btn-green btn-sm" data-action="openPersonDrawerNew">+ Add Candidate</button>`));
+  setView('Candidates','Every person is stored once by Person ID — edits update all slates that reference them.',peopleColsPickerHtml()+whereToggle+(locked('addPeople')?'':`<button class="btn btn-green btn-sm" data-action="openPersonDrawerNew">+ Add Candidate</button>`));
   const q=norm(v('search'));
   const df=roleFilters.find(f=>f.field==='department');
   const list=people.filter(p=>[p.id,p.name,p.title,p.department,p.location,p.readiness,p.candidateType,p.skills].join(' ').toLowerCase().includes(q)&&(!df||!df.values.length||df.values.includes(String(p.department||'').trim())));
   const boardName=id=>boards.find(b=>b.id===id)?.name;
   const capList=a=>a.length?esc(a.slice(0,3).join(', '))+(a.length>3?` <span class="hint">+${a.length-3} more</span>`:''):'—';
+  const colCell=(p,c)=>{
+    if(c==='slates')return `<td style="text-align:center">${successors.filter(s=>s.personId===p.id).length||'—'}</td>`;
+    if(c==='readiness')return `<td>${readinessBadge(p.readiness)}</td>`;
+    if(c==='title'){const cur=currentRoleForPerson(p.id);return `<td>${esc(p.title||'')}${cur?`<div style="color:var(--muted);font-size:11px">in ${esc(cur.title)}</div>`:''}</td>`}
+    const raw=c in p?p[c]:((p._x||{})[c]??'');
+    return `<td>${esc(String(raw??''))}</td>`;
+  };
   const rows=list.slice(0,LIST_CAP).map(p=>{
-    const slates=successors.filter(s=>s.personId===p.id).length;
-    const cur=currentRoleForPerson(p.id);
     let whereCells='';
     if(peopleShowWhere){
       const seatRoles=roles.filter(r=>r.incumbentPersonId===p.id);
       const slateRoles=successors.filter(s=>s.personId===p.id).map(s=>role(s.roleId)).filter(Boolean);
-      const roleNames=[...new Set([...seatRoles.map(r=>(r.title||r.id)+' (seat)'),...slateRoles.map(r=>r.title||r.id)])];
+      const seatNames=[...new Set(seatRoles.map(r=>r.title||r.id))];
+      const candNames=[...new Set(slateRoles.map(r=>r.title||r.id))];
       const tabNames=[...new Set([...seatRoles,...slateRoles].map(r=>boardName(r.boardId)).filter(Boolean))];
-      whereCells=`<td title="${attr(roleNames.join(', '))}">${capList(roleNames)}</td><td title="${attr(tabNames.join(', '))}">${capList(tabNames)}</td>`;
+      whereCells=`<td title="${attr(seatNames.join(', '))}">${capList(seatNames)}</td><td title="${attr(candNames.join(', '))}">${capList(candNames)}</td><td title="${attr(tabNames.join(', '))}">${capList(tabNames)}</td>`;
     }
     return `<tr class="row-click" data-action="openPerson" data-person-id="${attr(p.id)}">
       <td style="display:flex;align-items:center;gap:8px">${avatarHtml(p.name,26)}<div><b>${esc(p.name)}</b><div style="color:var(--muted);font-size:11px">${esc(p.id)}</div></div></td>
-      <td>${esc(p.title||'')}${cur?`<div style="color:var(--muted);font-size:11px">in ${esc(cur.title)}</div>`:''}</td>
-      <td>${esc(p.department||'')}</td><td>${esc(p.location||'')}</td>
-      <td>${readinessBadge(p.readiness)}</td><td>${esc(p.candidateType||'')}</td>
-      <td style="text-align:center">${slates||'—'}</td>${whereCells}
+      ${peopleCols.map(c=>colCell(p,c)).join('')}${whereCells}
       ${locked('del')?'':`<td style="text-align:center"><button class="icon-btn bad" data-action="deletePerson" data-person-id="${attr(p.id)}" title="Delete ${attr(p.name)} — removes them from every slate (undoable)">&#10005;</button></td>`}
     </tr>`;
   }).join('');
-  const whereHead=peopleShowWhere?'<th>Roles They&rsquo;re In</th><th>Tabs</th>':'';
+  const whereHead=peopleShowWhere?'<th>Current Role</th><th>Candidate For</th><th>Tabs</th>':'';
   el('mainView').innerHTML=list.length
-    ?`<div class="tablebox"><table class="table"><thead><tr><th>Name</th><th>Title</th><th>Department</th><th>Location</th><th>Readiness</th><th>Type</th><th>Slates</th>${whereHead}${locked('del')?'':'<th></th>'}</tr></thead><tbody>${rows}</tbody></table>${list.length>LIST_CAP?`<div class="tfoot-note">Showing ${LIST_CAP} of ${list.length} — refine the search to see more.</div>`:''}</div>`
+    ?`<div class="tablebox"><table class="table"><thead><tr><th>Name</th>${peopleCols.map(c=>`<th>${esc(peopleColLabel(c))}</th>`).join('')}${whereHead}${locked('del')?'':'<th></th>'}</tr></thead><tbody>${rows}</tbody></table>${list.length>LIST_CAP?`<div class="tfoot-note">Showing ${LIST_CAP} of ${list.length} — refine the search to see more.</div>`:''}</div>`
     :emptyState('No candidates found','Add a candidate or adjust the search.',locked('addPeople')?'':`<button class="btn btn-green" data-action="openPersonDrawerNew">+ Add Candidate</button>`);
 }
 
@@ -1544,7 +1596,9 @@ function renderPeople(){
 function ruleSummary(r){
   const roleNames=ids=>{const names=ids.map(id=>role(id)?.title||id);return names.slice(0,3).join(', ')+(names.length>3?` +${names.length-3} more`:'')};
   if(r.type==='BLOCK'){
-    const who=r.personId?personName(r.personId,r.personId):'Any person';
+    const pids=String(r.personId||'').split('|').filter(Boolean);
+    const names=pids.map(id=>personName(id,id));
+    const who=names.length?names.slice(0,3).join(', ')+(names.length>3?` +${names.length-3} more`:''):'Any person';
     const targets=String(r.targetRoleId||'').split('|').filter(Boolean);
     return r.operator==='cannot change role'?`${who} cannot change role`:`${who} cannot move to ${targets.length?roleNames(targets):'(no target role set)'}`;
   }
@@ -1752,6 +1806,7 @@ function addExtraFieldPrompt(){
 }
 
 function openAddChooser(){
+  trackDrawer('add',()=>openAddChooser());
   openDrawer('Add to the plan','Choose the record type.',
     `<div class="choice-grid">
       <div class="choice-card"><h3>Role / Employee</h3><div class="hint">Add a role or position with its current incumbent. Roles appear on boards and in the org tree.</div><div style="margin-top:12px"><button class="btn btn-primary" data-action="openRoleDrawerNew">Add Role / Employee</button></div></div>
@@ -1801,18 +1856,19 @@ function openPersonDrawer(id='',fromRole='',defaultType='Successor'){
   currentDrawerPersonId=id||'';
   const p=id?person(id):{id:uid('P'),name:'',title:'',department:'',email:'',location:'',jobLevel:'',readiness:'1-2 Years',source:'Internal',candidateType:defaultType,performance:'Medium',potential:'Medium',retentionRisk:'Low',mobility:'Unknown',confidence:'Medium',criticalExperience:'',skills:'',notes:''};
   if(id&&!p){notice('ERR','Person not found: '+id);return}
-  backRoleId=fromRole||'';
+  trackDrawer('person:'+(id||'new'),()=>openPersonDrawer(id,'',defaultType));
+  if(fromRole&&role(fromRole)&&!drawerStack.some(x=>x.key==='role:'+fromRole))drawerStack.push({key:'role:'+fromRole,open:()=>openRoleDrawer(fromRole)});
   openDrawer(id?p.name:'Add Employee / Candidate',id?`${p.title||'No title'} · ${p.id}`:'Candidate details drive rules and slate placement.',
     personForm(p)+extraFieldsSection(p,people,'person')+(id?personSlateSection(id):''),
     ()=>savePerson(id),
-    (id?`<button type="button" class="btn btn-danger" data-action="deletePerson" data-person-id="${attr(id)}">Delete Person</button>`:'')+`<button type="button" class="btn btn-quiet" data-action="openRoleDrawerNew">Add Role</button>`,
-    !!fromRole);
+    (id?`<button type="button" class="btn btn-danger" data-action="deletePerson" data-person-id="${attr(id)}">Delete Person</button>`:'')+`<button type="button" class="btn btn-quiet" data-action="openRoleDrawerNew">Add Role</button>`);
 }
 function renamePersonRefs(oldId,newId){
   successors.forEach(s=>{if(s.personId===oldId)s.personId=newId});
   roles.forEach(r=>{if(r.incumbentPersonId===oldId)r.incumbentPersonId=newId});
   rules.forEach(r=>{
-    if(r.personId===oldId)r.personId=newId;
+    if(String(r.personId||'').includes('|'))r.personId=String(r.personId).split('|').map(x=>x===oldId?newId:x).join('|');
+    else if(r.personId===oldId)r.personId=newId;
     if(r.altPersonId===oldId)r.altPersonId=newId;
     if(r.type==='AUTO_BACKFILL'){const cfg=safeJSON(r.value,null);if(cfg&&Array.isArray(cfg.customMappings)){let hit=false;cfg.customMappings.forEach(m=>{if(m.personId===oldId){m.personId=newId;hit=true}});if(hit)r.value=JSON.stringify(cfg)}}
   });
@@ -1862,6 +1918,7 @@ function deletePerson(id){
 function openRoleDrawer(id=''){
   const r=id?role(id):{id:uid('R'),title:'',level:'VP',department:'',boardId:'',managerRoleId:'',incumbentPersonId:'',incumbentName:'VACANT',risk:'Medium',criticality:'High',owner:'',status:'Active Plan',sortOrder:roles.length+1};
   if(id&&!r){notice('ERR','Role not found: '+id);return}
+  trackDrawer('role:'+(id||'new'),()=>openRoleDrawer(id));
   const slate=slateFor(r.id).map(s=>`<div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
       <span>#${esc(s.ranking)} ${s.autoMoveQueued?'&#9889; ':''}${s.approved?'&#10003; ':''}<b>${esc(personName(s.personId))}</b> · ${esc(s.readiness||'')} · ${esc(s.candidateType||'')}</span>
       <span style="display:flex;gap:4px;flex-wrap:wrap">
@@ -1880,7 +1937,7 @@ function openRoleDrawer(id=''){
       <div><label>Level</label>${formControl('rLevel',DEFAULT_LEVELS,r.level,'level')}</div>
       <div><label>Department</label>${formControl('rDept',[],r.department,'department')}</div>
       <div><label>Board / Tab</label><select id="rBoard" data-change="customSelect">${boardOptions(r.boardId)}</select></div>
-      <div><label>Manager Role</label><select id="rManager" data-change="customSelect">${roleOptions(r.managerRoleId)}</select></div>
+      <div><label>Reports To</label><select id="rManager" data-change="customSelect">${roleOptions(r.managerRoleId)}</select><div class="hint" style="margin-top:3px">The role this one reports to — this is what builds the Org Tree. Board tabs are separate and stay as you set them.</div></div>
       <div><label>Current Person</label><select id="rInc">${personOptions(r.incumbentPersonId)}</select></div>
       <div><label>Risk</label>${formControl('rRisk',['High','Medium','Low'],r.risk,'risk')}</div>
       <div><label>Criticality</label>${formControl('rCrit',['High','Medium','Low'],r.criticality,'criticality')}</div>
@@ -2058,6 +2115,12 @@ function rolesCheckboxPicker(cls,selected){
   const rows=roles.map(r=>{const id=checkboxId();return `<label for="${id}" data-rp="${attr(norm(r.title+' '+r.id))}"><input id="${id}" type="checkbox" class="${cls}" value="${attr(r.id)}" ${sel.has(r.id)?'checked':''}>${esc(r.title)}&nbsp;<span class="hint">(${esc(r.id)})</span></label>`}).join('');
   return `<div class="value-picker"><input class="rpFilter" placeholder="Filter roles&hellip;" style="margin-bottom:6px"><label class="select-all" for="${allId}"><input id="${allId}" type="checkbox" class="rpAll" data-cls="${cls}">Select all shown</label>${rows||'<div class="hint">No roles yet.</div>'}</div>`;
 }
+function peopleCheckboxPicker(cls,selected){
+  const sel=new Set(selected||[]);
+  const allId=checkboxId();
+  const rows=people.map(pp=>{const id=checkboxId();return `<label for="${id}" data-rp="${attr(norm(pp.name+' '+pp.id))}"><input id="${id}" type="checkbox" class="${cls}" value="${attr(pp.id)}" ${sel.has(pp.id)?'checked':''}>${esc(pp.name)}&nbsp;<span class="hint">(${esc(pp.id)})</span></label>`}).join('');
+  return `<div class="value-picker"><input class="rpFilter" placeholder="Filter people&hellip;" style="margin-bottom:6px"><label class="select-all" for="${allId}"><input id="${allId}" type="checkbox" class="rpAll" data-cls="${cls}">Select all shown</label>${rows||'<div class="hint">No people yet.</div>'}</div>`;
+}
 function checkedValues(cls){return[...document.querySelectorAll('.'+cls)].filter(x=>x.checked).map(x=>x.value)}
 function updateRuleTypeUI(){
   const type=v('ruleType');
@@ -2072,6 +2135,7 @@ function updateAutoCustomUI(){const val=v('autoTypeSelect');el('customAutoBox')?
 function openRuleDrawer(id=''){
   const r=id?rules.find(x=>x.id===id):{id:uid('RULE'),name:'',type:'FIELD_RULE',scope:'Candidate',field:'readiness',operator:'equals',value:'Ready Now',personId:'',targetRoleId:'',severity:'Block',message:'',enabled:true};
   if(id&&!r){notice('ERR','Rule not found: '+id);return}
+  trackDrawer('rule:'+(id||'new'),()=>openRuleDrawer(id));
   let conds=ruleConditions(r);
   if(!conds.length)conds=[{field:r.field||'readiness',operator:r.operator||'equals',value:r.value||'Ready Now'}];
   const cfg=autoRuleConfig(r),autoTypes=cfg.autoTypes||[],customMappings=cfg.customMappings||[],type=r.type||'FIELD_RULE';
@@ -2085,8 +2149,8 @@ function openRuleDrawer(id=''){
     <div><label>Enabled</label><select id="ruleEnabled"><option ${r.enabled?'selected':''}>true</option><option ${!r.enabled?'selected':''}>false</option></select></div>
     <div class="full"><label>Callout Message</label><textarea id="ruleMsg" placeholder="Shown when the rule fires">${esc(r.message)}</textarea></div>
   </div>
-  <div id="blockSection" class="rule-section"><h3>Block Rule</h3><div class="hint" style="margin-bottom:8px">Stop a specific person from being approved or auto-moved. Pick one target role or several.</div><div class="grid">
-    <div><label>Person</label><select id="rulePerson">${rulePersonOptions(r.personId)}</select></div>
+  <div id="blockSection" class="rule-section"><h3>Block Rule</h3><div class="hint" style="margin-bottom:8px">Stop people from being approved or auto-moved. Pick one person or several, and one target role or several — one rule covers them all.</div><div class="grid">
+    <div><label>Person(s)</label>${peopleCheckboxPicker('blockPersonCheck',String(r.personId||'').split('|').filter(Boolean))}</div>
     <div><label>Operator</label><select id="ruleBlockOperator"><option value="cannot move to target role" ${r.operator!=='cannot change role'?'selected':''}>cannot move to target role</option><option value="cannot change role" ${r.operator==='cannot change role'?'selected':''}>cannot change role</option></select></div>
     <div id="targetRoleBox"><label>Target Role(s)</label>${rolesCheckboxPicker('blockTargetCheck',String(r.targetRoleId||'').split('|').filter(Boolean))}</div>
   </div></div>
@@ -2109,7 +2173,7 @@ function openRuleDrawer(id=''){
 function saveRule(oldId=''){
   if(locked('rules')){lockNotice('rules');return}
   const type=v('ruleType');
-  const r={id:v('ruleId').trim()||uid('RULE'),name:v('ruleName'),type,scope:'Candidate',field:'',operator:'',value:'',personId:v('rulePerson'),targetRoleId:'',altPersonId:'',severity:v('ruleSeverity')||'Block',message:v('ruleMsg'),enabled:v('ruleEnabled')==='true'};
+  const r={id:v('ruleId').trim()||uid('RULE'),name:v('ruleName'),type,scope:'Candidate',field:'',operator:'',value:'',personId:'',targetRoleId:'',altPersonId:'',severity:v('ruleSeverity')||'Block',message:v('ruleMsg'),enabled:v('ruleEnabled')==='true'};
   if(r.id!==oldId&&rules.some(x=>x.id===r.id)){notice('ERR',`Rule ID "${r.id}" already exists.`);return}
   const missing=[];
   if(!r.name)r.name=type==='FIELD_RULE'?'Candidate Eligibility Rule':type==='BLOCK'?'Person Movement Block Rule':'Auto Backfill Rule';
@@ -2117,8 +2181,9 @@ function saveRule(oldId=''){
   if(type==='BLOCK'){
     r.severity='Block';
     r.operator=v('ruleBlockOperator')||'cannot move to target role';
+    r.personId=checkedValues('blockPersonCheck').join('|');
     r.targetRoleId=checkedValues('blockTargetCheck').join('|');
-    if(!r.personId)missing.push('Person');
+    if(!r.personId)missing.push('At least one person');
     if(r.operator==='cannot move to target role'&&!r.targetRoleId)missing.push('At least one target role');
     if(r.operator==='cannot change role')r.targetRoleId='';
   }
@@ -2172,6 +2237,7 @@ function toggleRule(id,on){
 function tabRowHtml(b={id:'',name:''}){return `<div class="tab-row"><div><label>Board ID</label><input class="bId" value="${attr(b.id||uid('BOARD'))}"></div><div><label>Board Name</label><input class="bName" value="${attr(b.name||'New Tab')}"></div><button class="btn btn-danger btn-sm" type="button" data-action="removeParent" data-target=".tab-row" style="align-self:end">Remove</button></div>`}
 function addBoardRow(){el('boardRows').insertAdjacentHTML('beforeend',tabRowHtml({id:uid('BOARD'),name:'New Tab'}))}
 function openBoardDrawer(){
+  trackDrawer('boards',()=>openBoardDrawer());
   const rows=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).map(b=>tabRowHtml(b)).join('');
   openDrawer('Manage Tabs','Board tabs group roles. A role joins a board via its Board/Tab field (or when the board name matches its department). Changes apply on Save.',
     `<div id="boardRows">${rows||''}</div><button class="btn btn-green btn-sm" type="button" data-action="addBoardRow">+ Add Tab</button>`,
@@ -2467,6 +2533,9 @@ const ACTIONS={
   openCSV:()=>openCSV(),
   saveCSV:()=>saveCSV(),
   exportCSV:()=>exportCSV(),
+  exportChooser:()=>openExportChooser(),
+  exportCSVGo:()=>{exportCSV();closeDrawer()},
+  exportXlsxGo:()=>{exportXlsxWorkbook();closeDrawer()},
   addChooser:()=>openAddChooser(),
   undo:()=>undoLastAction(),
   toggleMenu:()=>el('moreMenu').classList.toggle('open'),
@@ -2494,6 +2563,7 @@ const ACTIONS={
   closeDrawer:()=>closeDrawer(),
   goBack:()=>goBack(),
   deletePerson:d=>deletePerson(d.personId),
+  peopleColsOpen:()=>{peopleColsPop=!peopleColsPop;renderPeople()},
   fchipOpen:d=>{filterPop=(filterPop&&filterPop.scope===d.scope&&filterPop.field===d.field)?null:{scope:d.scope,field:d.field};fillFilters()},
   fchipAdd:d=>{filterPop=(filterPop&&filterPop.scope===d.scope&&filterPop.field==='__add__')?null:{scope:d.scope,field:'__add__'};fillFilters()},
   fchipAddField:d=>{filtersOf(d.scope).push({field:d.field,values:[]});filterPop={scope:d.scope,field:d.field};if(d.scope==='role')render();else{fillFilters();renderPieceBox()}},
@@ -2540,6 +2610,7 @@ document.addEventListener('click',e=>{
   if(menu.classList.contains('open')&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');
   if(chess&&chess.menuOpen&&!e.target.closest('.chess-fields-wrap')){chess.menuOpen=false;renderChessView()}
   if(filterPop&&!e.target.closest('.fchip')){filterPop=null;fillFilters()}
+  if(peopleColsPop&&!e.target.closest('.fchip')){peopleColsPop=false;if(activeTab==='PEOPLE')renderPeople()}
   if(!elm)return;
   const lk=LOCK_ACTIONS[elm.dataset.action];
   if(lk&&locked(lk)){e.preventDefault();lockNotice(lk);return}
@@ -2568,6 +2639,12 @@ document.addEventListener('change',e=>{
   if(t.id==='shareProgram')return el('shareProgOpts')?.classList.toggle('hidden',!t.checked);
   if(t.id==='shareAll')return el('shareBoardsBox')?.classList.toggle('hidden',t.checked);
   if(t.id==='peopleWhereFlag'){peopleShowWhere=t.checked;try{localStorage.setItem(PEOPLE_WHERE_KEY,peopleShowWhere?'1':'0')}catch(err){}return renderPeople()}
+  if(t.classList.contains('pcolCheck')){
+    if(t.checked){if(peopleCols.length>=PEOPLE_COLS_MAX){t.checked=false;return}peopleCols=[...peopleCols,t.value]}
+    else peopleCols=peopleCols.filter(c=>c!==t.value);
+    try{localStorage.setItem(PEOPLE_COLS_KEY,JSON.stringify(peopleCols))}catch(err){}
+    return renderPeople();
+  }
   if(t.id==='chessRoleSwitch')return chessGoTo(t.value);
   if(t.id==='ruleType')return updateRuleTypeUI();
   if(t.id==='ruleBlockOperator')return updateBlockTargetUI();
@@ -2937,6 +3014,7 @@ function startSheetImport(fileTexts,dbExtras){
   openImportReview(buildSheetImport(fileTexts||[],dbExtras));
 }
 function openImportReview(review){
+  drawerStack=[];drawerCurrent=null; // reviews stand alone — Apply or Cancel, no Back
   importReview=review;lastImportReport=review.report;
   const s=review.stats;
   const sevBadge=s=>s==='ERROR'?'<span class="badge red">Error</span>':s==='WARNING'?'<span class="badge amber">Warning</span>':'<span class="badge gray">Info</span>';
@@ -3345,6 +3423,7 @@ function buildScopedData(scope){
   return{boards:deepClone(bs),people:deepClone(people.filter(p=>pids.has(p.id))),roles:deepClone(rolesSub),successors:deepClone(succSub),rules:[],history:[],customFieldValues:deepClone(customFieldValues),chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS};
 }
 function openShareDrawer(){
+  trackDrawer('share',()=>openShareDrawer());
   const customs=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id));
   const progSection=anyLocks()
     ?'<div class="form-note" style="margin-top:14px">This is a restricted shared copy of the planner — it can share data files, but not the program itself.</div>'
@@ -3408,6 +3487,19 @@ async function reviewFromWorkbookBuffer(buf,name){
   review.mode='convert';
   review.outName=String(name||'workbook.xlsx').replace(/\.xlsx$/i,'')+'_planner.csv';
   return review;
+}
+async function openWorkbookAsDatabase(buf,name){
+  let review;
+  try{review=await reviewFromWorkbookBuffer(buf,name)}
+  catch(e){notice('ERR','Could not read that Excel file: '+e.message);return false}
+  const errs=review.report.filter(r=>r.severity==='ERROR').length;
+  if(!loadCSV(convertedCsvFromReview(review))){notice('ERR','That workbook has no usable People / Roles / Candidates tabs — start from the sample workbook (⋯ menu).');return false}
+  fileHandle=null;
+  el('dbStatus').textContent=name;
+  bannerState.fileName='';bannerState.backup=null;renderBanners();
+  lastImportReport=review.report;
+  notice(errs?'WARN':'OK',`Excel workbook opened${errs?` — ${errs} row(s) were skipped (⋯ → the error report has details)`:''}. The database stays CSV: Save will ask where to write the .csv file.`);
+  return true;
 }
 function pickConvertXlsx(){
   const input=document.createElement('input');
@@ -3473,6 +3565,7 @@ function deleteCustomField(name){
   render();openDataTools();
 }
 function openDataTools(){
+  trackDrawer('dataTools',()=>openDataTools());
   const fields=allExtraFieldNames();
   const rows=fields.map(name=>{
     const a=allowedTypesFor(name);
@@ -3661,6 +3754,7 @@ function updateWidgetFilterControls(){
   }
 }
 function openWidgetDrawer(preset={}){
+  trackDrawer('widget',()=>openWidgetDrawer());
   const p={title:preset.title||'',source:preset.source||'roles',kind:preset.kind||'count',field:preset.field||''};
   const needsField=['sum','avg','bar','pie','donut'].includes(p.kind);
   const fieldChoices=['bar','pie','donut'].includes(p.kind)?widgetFieldChoices(p.source):widgetNumericChoices(p.source);
@@ -3745,6 +3839,7 @@ Object.assign(ACTIONS,{
 const APP_THEMES=[['classic','Classic Blue','#0b66c2'],['forest','Forest','#147a41'],['plum','Royal Plum','#6d28d9'],['sunset','Sunset','#c2570b'],['ocean','Ocean','#0e7490']];
 const APP_BOARDS=[['classic','Classic','#eef1f6','#ffffff'],['wood','Wood','#dfc094','#f7ead2'],['felt','Card Table','#c9e7d4','#eaf6ef'],['marble','Marble','#d8dde6','#f4f6fa']];
 function openAppearanceDrawer(){
+  trackDrawer('appearance',()=>openAppearanceDrawer());
   openDrawer('Appearance','A little fun. Your choices are saved on this computer only — they never change the data or anyone else’s view.',
     `<div class="rule-section"><h3>Color Theme</h3><div class="appearance-grid">${APP_THEMES.map(([id,name,color])=>`<button type="button" class="app-swatch ${appearance.theme===id?'selected':''}" data-action="setTheme" data-value="${id}"><span class="swatch-dot" style="background:${color}"></span>${name}</button>`).join('')}</div></div>
      <div class="rule-section"><h3>Chess Pieces</h3><div class="appearance-grid">${Object.entries(PIECE_SETS).map(([id,s])=>`<button type="button" class="app-swatch ${appearance.pieces===id?'selected':''}" data-action="setPieces" data-value="${id}"><span class="swatch-pieces">${s.king} ${s.ranks.map(r=>r[0]).join('')}</span>${s.name}</button>`).join('')}</div></div>
@@ -3803,7 +3898,7 @@ function buildProgramCopy(locks){
 if(locked('tools'))document.querySelectorAll('[data-action="dataTools"],[data-action="importSheets"],[data-action="downloadSheetTemplates"],[data-action="downloadSampleXlsx"]').forEach(x=>x.style.display='none');
 render();
 checkBackup().then(()=>{if(!roles.length&&!people.length)setStatus('Ready — open your CSV database or add records.')});
-Object.assign(window.__APP__,{buildProgramCopy,locked,lockNotice,filterValueChoices,customFilterFields,fillFilters,passesFilters});
+Object.assign(window.__APP__,{buildProgramCopy,locked,lockNotice,filterValueChoices,customFilterFields,fillFilters,passesFilters,openWorkbookAsDatabase,openExportChooser,goBack});
 Object.defineProperty(window.__APP__,'programLocks',{get:()=>PROGRAM_LOCKS});
 Object.defineProperty(window.__APP__,'peopleShowWhere',{get:()=>peopleShowWhere});
 Object.defineProperty(window.__APP__,'roleFilters',{get:()=>roleFilters});

@@ -9,10 +9,14 @@ One HTML file, one CSV. No install, no server, no accounts.
    demos and learning; see `DEMO_SCRIPT.md` for a 5-minute walkthrough) and
    **`succession_data.csv`** (full-size test data).
 2. Open `succession_planner.html` in Chrome or Edge.
-3. Click **Open CSV** and pick the database file (you can also just drag the .csv
-   onto the window).
-4. Work the boards. Click **Save** (or `Ctrl+S`) to write changes straight back to
-   the same CSV file. **Export** downloads a copy instead.
+3. Click **Open CSV / Excel** and pick the database file — a planner CSV or a
+   whole Excel workbook (People / Roles / Candidates / Boards tabs; anything
+   broken lands in the error report). You can also just drag the file onto the
+   window.
+4. Work the boards. Click **Save** (or `Ctrl+S`) to write changes straight back
+   to the same CSV file (the database always stays CSV — a workbook you opened
+   saves as a new .csv). **Export** downloads a copy and asks which format you
+   want: planner CSV or an Excel workbook.
 
 The header shows the loaded file and an **Unsaved changes** dot whenever there is
 work that hasn't been written to the CSV yet.
@@ -30,7 +34,10 @@ only — the CSV file is always the real database, so keep saving.
 - **Org Tree** — the reporting-line chart on a full-page canvas. It opens
   fitted and centered; scroll to zoom, hold and drag to move around (like
   Lucidchart), click any role to open it, and use the + / − / Fit buttons in
-  the corner.
+  the corner. The tree is built from each role's **Reports To** field (on the
+  role form): pick the role it reports to from the dropdown and the line is
+  drawn — it never moves the role between board tabs. Roles with no Reports To
+  are placed by level within their department (dashed lines) until you set one.
 - **All Roles / your boards** — the working boards, grouped by level. Drag
   candidates from the Candidate Box onto roles; drag slate rows to re-prioritize.
   Tabs are yours to manage (the **+** tab or ⋯ → *Manage tabs*).
@@ -48,10 +55,13 @@ only — the CSV file is always the real database, so keep saving.
   **+ Filter** adds readiness, candidate type, location or any custom person
   field that has at least one value. The **✕** at the end of a row deletes that person
   everywhere (after asking) — their slate rows go too, and Undo brings it all
-  back. Tick **Show roles & tabs** (off by default) to add two columns showing
-  every role they're in — the seat they hold marked "(seat)" plus every slate —
-  and which board tabs those roles live on. The tick is remembered on your
-  computer and never changes the data.
+  back. The **Columns ▾** picker chooses what the table shows — Name always
+  stays, plus up to four more fields of your choice (built-ins or any custom
+  field that has at least one value), remembered on your computer. Tick
+  **Show roles & tabs** (off by default) for three extra columns: **Current
+  Role** (the seat they hold), **Candidate For** (every slate they're on) and
+  **Tabs** (the boards those roles live on). Neither setting ever changes the
+  data.
 - **Insights** — bench coverage, Ready-Now coverage, vacancies, and the roles
   that need attention (the filter bar applies to these), plus **My Dashboard**:
   up to 8 widgets of your own — a count or % with an optional filter ("roles
@@ -110,9 +120,10 @@ Three kinds, editable in plain language:
   roles*, or switch to *Only selected roles…* and tick exactly the roles it
   should guard (a filter box and "select all shown" make big lists quick).
   The rule list spells the scope out in plain words.
-- **Block a person's move** — a specific person cannot move into the **target
-  roles you tick** (one or many — same checkbox picker), or cannot change role
-  at all.
+- **Block a person's move** — **one person or several at once** (checkbox
+  picker with a filter box) cannot move into the **target roles you tick**
+  (one or many), or cannot change role at all. One rule covers the whole
+  list — no need to save a separate rule per person.
 - **Auto backfill** — when a role becomes vacant, pull in the top-ranked slate
   candidate of a chosen type, or use an explicit role → person chart.
 
@@ -217,6 +228,11 @@ and never change the data or anyone else's view. The 🎨 button is also in the
 chess-board header, so you can preview sets live on the board.
 
 ## Safety
+
+Every drawer opened from inside another one has a **← Back** button — open a
+person, jump to one of their roles, press Back and you're on that person again
+(same for Data Tools → Share and every other chain). Closing the drawer ends
+the chain.
 
 **Undo** (or `Ctrl+Z`) steps back through the last 40 changes. ⋯ → *Reset org
 changes* returns roles and slates to the state of the last CSV import while
