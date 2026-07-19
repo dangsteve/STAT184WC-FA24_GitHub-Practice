@@ -59,6 +59,19 @@ async function typeInto(page, id, value) {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }, [id, value]);
 }
+async function chipOpen(page, scope, field) {
+  const open = await page.evaluate(([scope, field]) =>
+    !!document.querySelector(`.fchip-pop .fchipVal[data-scope="${scope}"][data-field="${field}"], .fchip-pop [data-action="fchipClear"][data-scope="${scope}"][data-field="${field}"]`), [scope, field]);
+  if (!open) await page.click(`.fchip-btn[data-scope="${scope}"][data-field="${field}"]`);
+}
+async function chipPick(page, scope, field, value) {
+  await chipOpen(page, scope, field);
+  await page.click(`.fchip-pop .fchipVal[data-scope="${scope}"][data-field="${field}"][value="${value}"]`);
+}
+async function chipClear(page, scope, field) {
+  await chipOpen(page, scope, field);
+  await page.click(`.fchip-pop [data-action="fchipClear"][data-scope="${scope}"][data-field="${field}"]`);
+}
 async function simulateDrag(page, srcSel, dstSel) {
   return page.evaluate(([srcSel, dstSel]) => {
     const src = document.querySelector(srcSel), dst = document.querySelector(dstSel);
@@ -160,27 +173,27 @@ function parseCsvRows(text) {
     assertEq(shown, expected, 'search results');
     await typeInto(page, 'search', ''); await page.waitForTimeout(250);
   });
-  await test('department / risk / readiness / level filters work', async () => {
-    await setSelect(page, 'deptFilter', 'Finance');
-    let shown = await page.locator('.role').count();
-    let expected = await page.evaluate(() => __APP__.roles.filter(r => r.department === 'Finance').length);
-    assertEq(shown, expected, 'dept filter');
-    await setSelect(page, 'deptFilter', 'All Departments');
-    await setSelect(page, 'riskFilter', 'High');
-    shown = await page.locator('.role').count();
-    expected = await page.evaluate(() => __APP__.roles.filter(r => r.risk === 'High').length);
-    assertEq(shown, expected, 'risk filter');
-    await setSelect(page, 'riskFilter', 'All Risks');
-    await setSelect(page, 'readinessFilter', 'No Candidate');
-    shown = await page.locator('.role').count();
-    expected = await page.evaluate(() => __APP__.roles.filter(r => !__APP__.successors.some(s => s.roleId === r.id)).length);
-    assertEq(shown, expected, 'readiness=No Candidate filter');
-    await setSelect(page, 'readinessFilter', 'All Readiness');
-    await setSelect(page, 'levelFilter', 'C-Suite');
-    shown = await page.locator('.role').count();
-    expected = await page.evaluate(() => __APP__.roles.filter(r => r.level === 'C-Suite').length);
-    assertEq(shown, expected, 'level filter');
-    await setSelect(page, 'levelFilter', 'All Levels');
+  await test('department / risk / readiness / level filter chips work (multiselect + clear)', async () => {
+    const roleCount = () => page.locator('.role').count();
+    await chipPick(page, 'role', 'department', 'Finance');
+    assertEq(await roleCount(), await page.evaluate(() => __APP__.roles.filter(r => r.department === 'Finance').length), 'dept filter');
+    const d2 = await page.evaluate(() => [...new Set(__APP__.roles.map(r => r.department).filter(d => d && d !== 'Finance'))][0]);
+    await chipPick(page, 'role', 'department', d2);
+    assertEq(await roleCount(), await page.evaluate(d2 => __APP__.roles.filter(r => ['Finance', d2].includes(r.department)).length, d2), 'multiselect ORs the two departments');
+    assert((await page.evaluate(() => document.getElementById('filterChips').textContent)).includes('+1'), 'chip label counts the extra selection');
+    await chipClear(page, 'role', 'department');
+    assertEq(await roleCount(), 72, 'All (clear) resets the chip');
+    await chipPick(page, 'role', 'risk', 'High');
+    assertEq(await roleCount(), await page.evaluate(() => __APP__.roles.filter(r => r.risk === 'High').length), 'risk filter');
+    await chipClear(page, 'role', 'risk');
+    await chipPick(page, 'role', 'readiness', 'No Candidate');
+    assertEq(await roleCount(), await page.evaluate(() => __APP__.roles.filter(r => !__APP__.successors.some(s => s.roleId === r.id)).length), 'readiness=No Candidate filter');
+    await chipClear(page, 'role', 'readiness');
+    await chipPick(page, 'role', 'level', 'C-Suite');
+    assertEq(await roleCount(), await page.evaluate(() => __APP__.roles.filter(r => r.level === 'C-Suite').length), 'level filter');
+    await chipClear(page, 'role', 'level');
+    await page.evaluate(() => { __APP__.fillFilters() });
+    await page.click('body', { position: { x: 5, y: 5 } }); // close any open popover
   });
 
   /* ===================================================================
@@ -831,8 +844,8 @@ function parseCsvRows(text) {
     const setting = rows.find(r => r.recordType === 'SETTING');
     assert(setting.settingValue.includes('Ready In 6 Months'), 'custom value in SETTING row');
     // and it shows up in the filter bar after render
-    const inFilter = await page.evaluate(() => [...document.getElementById('readinessFilter').options].some(o => o.value === 'Ready In 6 Months'));
-    assert(inFilter, 'available in filters');
+    const inFilter = await page.evaluate(() => __APP__.filterValueChoices('role', 'readiness').includes('Ready In 6 Months'));
+    assert(inFilter, 'available in the readiness filter chip');
   });
   await test('add manager role inline from role form (+ Add new manager role…)', async () => {
     const n = (await counts(page)).roles;
@@ -934,12 +947,13 @@ function parseCsvRows(text) {
     assertEq(kpiText[3], String(expected.vacant), 'vacant KPI');
     assert(await page.locator('.insight-card').count() >= 4, 'insight cards render');
   });
-  await test('insights respects department filter', async () => {
-    await setSelect(page, 'deptFilter', 'Finance');
+  await test('insights respects the department filter chip', async () => {
+    await chipPick(page, 'role', 'department', 'Finance');
     const expected = await page.evaluate(() => __APP__.roles.filter(r => r.department === 'Finance').length);
     const kpi = await page.evaluate(() => document.querySelector('.kpi b').textContent);
     assertEq(kpi, String(expected), 'filtered role count');
-    await setSelect(page, 'deptFilter', 'All Departments');
+    await chipClear(page, 'role', 'department');
+    await page.click('body', { position: { x: 5, y: 5 } });
   });
 
   /* ===================================================================
@@ -2215,7 +2229,7 @@ function parseCsvRows(text) {
     await page.evaluate(() => __APP__.openShareDrawer());
     assert(await page.evaluate(() => !!document.getElementById('shareProgram')), 'opt-in checkbox exists');
     assert(await page.evaluate(() => document.getElementById('shareProgOpts').classList.contains('hidden')), 'feature list hidden until they opt in');
-    await page.click('#shareProgram');
+    await page.click('#shareProgramSwitch');
     assert(await page.evaluate(() => !document.getElementById('shareProgOpts').classList.contains('hidden')), 'opting in reveals the feature checkboxes');
     const feats = await page.evaluate(() => [...document.querySelectorAll('.shareFeature')].map(c => ({ v: c.value, on: c.checked })));
     assertEq(feats.length, 6, 'six lockable features offered');
@@ -2249,7 +2263,7 @@ function parseCsvRows(text) {
       const bad = __APP__.successors.find(s => s.readiness !== 'Ready Now');
       out.rulesStillEnforce = __APP__.evaluateRules(bad).blocks.length > 0;
       __APP__.openShareDrawer();
-      out.dataShareStillWorks = !!document.getElementById('shareScope');
+      out.dataShareStillWorks = !!document.getElementById('shareAll');
       out.noProgramReshare = !document.getElementById('shareProgram') && document.getElementById('drawerBody').textContent.includes('restricted shared copy');
       out.cannotMintCopies = __APP__.buildProgramCopy({}) === null;
       return out;
@@ -2329,7 +2343,7 @@ function parseCsvRows(text) {
     assertEq(before.flag, false, 'off by default');
     assert(!before.txt.includes('Tabs'), 'no extra columns by default');
     const csvBefore = await csvOf(page);
-    await page.click('#peopleWhereFlag');
+    await page.click('#peopleWhereSwitch');
     const on = await page.evaluate(() => ({
       ths: document.querySelectorAll('#mainView thead th').length,
       txt: document.querySelector('#mainView thead').textContent,
@@ -2357,14 +2371,134 @@ function parseCsvRows(text) {
     await page.waitForFunction(() => window.__APP__ && __APP__.people.length > 0);
     await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
     assert(await page.evaluate(() => document.getElementById('peopleWhereFlag').checked), 'flag survives a reload (per-browser)');
-    await page.click('#peopleWhereFlag'); // back off for the rest of the suite
+    await page.click('#peopleWhereSwitch'); // back off for the rest of the suite
     assert(!(await page.evaluate(() => document.getElementById('peopleWhereFlag').checked)), 'flag off again');
   });
 
   /* ===================================================================
-     23. SCREENSHOTS for the report
+     23. FILTER CHIPS, MULTI-BOARD SHARE, ONE-BY-ONE FIELDS, SWITCHES
      =================================================================== */
-  section('23. Screenshots');
+  section('23. Filter chips, multi-board share, one-by-one fields, switches');
+  await test('+ Filter adds a role filter (criticality), applies it, and ✕ removes it', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.activeTab = 'ALL'; __APP__.render(); });
+    const total = await page.locator('.role').count();
+    await page.click('.fchip-add[data-scope="role"]');
+    assert(await page.evaluate(() => !!document.querySelector('[data-action="fchipAddField"][data-scope="role"][data-field="criticality"]')), 'criticality offered in the + Filter list');
+    await page.click('[data-action="fchipAddField"][data-scope="role"][data-field="criticality"]');
+    await page.click('.fchip-pop .fchipVal[data-scope="role"][data-field="criticality"][value="High"]');
+    const expected = await page.evaluate(() => __APP__.roles.filter(r => r.criticality === 'High').length);
+    assertEq(await page.locator('.role').count(), expected, 'the added filter applies');
+    assert((await page.evaluate(() => document.getElementById('filterChips').textContent)).includes('Criticality'), 'chip is labeled');
+    await page.click('.fchip-x[data-scope="role"][data-field="criticality"]');
+    assertEq(await page.locator('.role').count(), total, '✕ removes the filter and everything returns');
+    assert(await page.evaluate(() => !__APP__.roleFilters.some(f => f.field === 'criticality')), 'filter removed from state');
+  });
+  await test('custom role fields are filterable only once at least one role has a value', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.activeTab = 'ALL'; __APP__.render(); });
+    assert(!(await page.evaluate(() => __APP__.customFilterFields('role').includes('Site Code'))), 'no value anywhere → not offered');
+    await page.evaluate(() => { const r = __APP__.roles[0]; r._x = { ...(r._x || {}), 'Site Code': 'HQ-1' }; __APP__.render(); });
+    assert(await page.evaluate(() => __APP__.customFilterFields('role').includes('Site Code')), 'one role has a value → offered');
+    await page.click('.fchip-add[data-scope="role"]');
+    await page.click('[data-action="fchipAddField"][data-scope="role"][data-field="Site Code"]');
+    await page.click('.fchip-pop .fchipVal[data-scope="role"][data-field="Site Code"][value="HQ-1"]');
+    assertEq(await page.locator('.role').count(), 1, 'only the role holding that value shows');
+    await page.click('.fchip-x[data-scope="role"][data-field="Site Code"]');
+  });
+  await test('Candidate Box: department chip multiselects; Compa-Ratio filterable only with a value', async () => {
+    await loadBase(page);
+    const d1 = await page.evaluate(() => [...new Set(__APP__.people.map(p => p.department).filter(Boolean))][0]);
+    await chipPick(page, 'piece', 'department', d1);
+    const expected = await page.evaluate(d => __APP__.people.filter(p => p.department === d).length, d1);
+    assertEq(await page.evaluate(() => document.querySelectorAll('#pieceBox .piece').length), Math.min(expected, 200), 'box filtered by department');
+    await chipClear(page, 'piece', 'department');
+    assert(!(await page.evaluate(() => __APP__.customFilterFields('piece').includes('Compa-Ratio'))), 'Compa-Ratio not offered while nobody has a value');
+    await page.evaluate(() => { const p = __APP__.people[3]; p._x = { ...(p._x || {}), 'Compa-Ratio': '1.05' }; __APP__.fillFilters(); });
+    assert(await page.evaluate(() => __APP__.customFilterFields('piece').includes('Compa-Ratio')), 'offered once one candidate has a value');
+    await page.click('.fchip-add[data-scope="piece"]');
+    await page.click('[data-action="fchipAddField"][data-scope="piece"][data-field="Compa-Ratio"]');
+    await page.click('.fchip-pop .fchipVal[data-scope="piece"][data-field="Compa-Ratio"][value="1.05"]');
+    assertEq(await page.evaluate(() => document.querySelectorAll('#pieceBox .piece').length), 1, 'only that candidate remains in the box');
+    await page.click('.fchip-x[data-scope="piece"][data-field="Compa-Ratio"]');
+    await page.click('.fchip-add[data-scope="piece"]');
+    assert(await page.evaluate(() => !!document.querySelector('[data-action="fchipAddField"][data-scope="piece"][data-field="readiness"]')), 'more person fields (readiness etc.) are addable');
+    await page.click('.fchip-add[data-scope="piece"]'); // close the list
+  });
+  await test('share: Everything by default; several boards multiselect and union; empty pick refused', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openShareDrawer());
+    assert(await page.evaluate(() => document.getElementById('shareAll').checked), 'Everything is on by default');
+    assert(await page.evaluate(() => document.getElementById('shareBoardsBox').classList.contains('hidden')), 'board list hidden while Everything is on');
+    await page.click('#shareAllSwitch');
+    assert(await page.evaluate(() => !document.getElementById('shareBoardsBox').classList.contains('hidden')), 'switching it off reveals the board checkboxes');
+    const ids = await page.evaluate(() => __APP__.boards.filter(b => !['MASTER', 'ALL', 'PEOPLE', 'INSIGHTS', 'RULES', 'HISTORY'].includes(b.id)).slice(0, 2).map(b => b.id));
+    assertEq(ids.length, 2, 'two custom boards to test with');
+    await page.evaluate(ids => { [...document.querySelectorAll('.shareBoardCheck')].filter(c => ids.includes(c.value)).forEach(c => c.click()); }, ids);
+    const scoped = await page.evaluate(ids => {
+      const d = __APP__.buildScopedData(ids);
+      const union = new Set([...__APP__.buildScopedData(ids[0]).roles, ...__APP__.buildScopedData(ids[1]).roles].map(r => r.id));
+      return { boards: d.boards.length, roles: d.roles.length, unionSize: union.size, csv: __APP__.toCSV(d) };
+    }, ids);
+    assertEq(scoped.boards, 2, 'both tabs included');
+    assertEq(scoped.roles, scoped.unionSize, 'roles are exactly the union of the two boards');
+    await page.evaluate(() => { [...document.querySelectorAll('.shareBoardCheck')].forEach(c => { c.checked = false; }); });
+    await page.click('#drawerSave');
+    const msg = await lastMsg(page);
+    assert(msg.type === 'ERR' && msg.message.includes('at least one board'), 'exporting with nothing picked is refused');
+    await page.evaluate(() => __APP__.closeDrawer());
+    await loadBase(page, scoped.csv); // recipient opens the two-board file
+    assertEq(await page.evaluate(() => __APP__.boards.filter(b => !['MASTER', 'ALL', 'PEOPLE', 'INSIGHTS', 'RULES', 'HISTORY'].includes(b.id)).length), 2, 'recipient sees exactly the two shared tabs');
+  });
+  await test('Data Tools: add fields one at a time; form first, bulk below, built-ins last', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openDataTools());
+    await typeInto(page, 'dtFieldName', 'Compa-Ratio');
+    await setSelect(page, 'dtFieldType', 'number');
+    await setSelect(page, 'dtFieldOn', 'person');
+    await page.click('[data-action="dtAddField"]');
+    const ft = await page.evaluate(() => __APP__.fieldTypes['Compa-Ratio']);
+    assert(ft && ft.type === 'number' && ft.on === 'person', 'field registered with type + scope');
+    assert(await page.evaluate(() => document.getElementById('drawerBody').textContent.includes('Compa-Ratio')), 'appears in the Custom Field Types table right away');
+    await typeInto(page, 'dtFieldName', 'Compa-Ratio');
+    await page.click('[data-action="dtAddField"]');
+    const dup = await lastMsg(page);
+    assert(dup.type === 'ERR' && dup.message.includes('already exists'), 'duplicate refused');
+    const order = await page.evaluate(() => {
+      const t = document.getElementById('drawerBody').innerHTML;
+      return ['Add a Field', 'Custom Field Types', 'Bulk Add Fields', 'Built-in Field Types'].map(h => t.indexOf(h));
+    });
+    assert(order.every((x, i) => x > -1 && (i === 0 || x > order[i - 1])), 'sections ordered: add-one → custom → bulk → built-ins last (' + order.join(',') + ')');
+    await page.evaluate(() => __APP__.closeDrawer());
+    const rows = parseCsvRows(await csvOf(page));
+    const setting = rows.find(r => r.recordType === 'SETTING' && r.settingKey === 'fieldTypes');
+    assert(setting && setting.settingValue.includes('Compa-Ratio'), 'persisted in the CSV');
+    await page.evaluate(() => __APP__.openPersonDrawer(__APP__.people[0].id));
+    assert(await page.evaluate(() => !!document.querySelector('#drawerBody .extraField[data-extra-key="Compa-Ratio"]')), 'typed field appears on the person form');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('flags render as real toggle switches', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
+    const sw = await page.evaluate(() => {
+      const label = document.getElementById('peopleWhereSwitch');
+      return { isSwitch: label.classList.contains('switch'), knob: !!label.querySelector('.knob'), rawHidden: getComputedStyle(label.querySelector('input')).opacity === '0' };
+    });
+    assert(sw.isSwitch && sw.knob, 'Show roles & tabs uses the switch component');
+    assert(sw.rawHidden, 'the raw checkbox is hidden behind the knob');
+    await page.click('#peopleWhereSwitch');
+    assert(await page.evaluate(() => document.getElementById('peopleWhereFlag').checked), 'clicking the switch toggles it on');
+    await page.click('#peopleWhereSwitch');
+    assert(!(await page.evaluate(() => document.getElementById('peopleWhereFlag').checked)), 'and off again');
+    await page.evaluate(() => __APP__.openShareDrawer());
+    assert(await page.evaluate(() => !!document.querySelector('#shareAllSwitch .knob') && !!document.querySelector('#shareProgramSwitch .knob')), 'share drawer switches too');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+
+  /* ===================================================================
+     24. SCREENSHOTS for the report
+     =================================================================== */
+  section('24. Screenshots');
   await test('capture UI screenshots', async () => {
     await page.setViewportSize({ width: 1560, height: 980 });
     await page.evaluate(() => localStorage.clear());

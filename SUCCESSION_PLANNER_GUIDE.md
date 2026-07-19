@@ -34,8 +34,19 @@ only — the CSV file is always the real database, so keep saving.
 - **All Roles / your boards** — the working boards, grouped by level. Drag
   candidates from the Candidate Box onto roles; drag slate rows to re-prioritize.
   Tabs are yours to manage (the **+** tab or ⋯ → *Manage tabs*).
+  **Filters are chips now**: click a chip (Level, Department, Risk, Readiness)
+  and tick as many values as you like — two departments show both. *All
+  (clear)* resets a chip, **✕** removes it entirely, and **+ Filter** adds any
+  other role field — Criticality, Status, Owner, or one of your own custom
+  fields. A custom field shows up in that list only once at least one role
+  actually has a value in it (add a Compa-Ratio value to one role and it
+  becomes filterable; while it's empty everywhere it stays out of the way).
+  The chips drive the boards, Insights and the Candidates tab together.
 - **Candidates** — every person, stored once by Person ID. Edits update every
-  slate that references them. The **✕** at the end of a row deletes that person
+  slate that references them. The **Candidate Box** on the right has the same
+  filter chips — Department out of the box (pick several at once), and
+  **+ Filter** adds readiness, candidate type, location or any custom person
+  field that has at least one value. The **✕** at the end of a row deletes that person
   everywhere (after asking) — their slate rows go too, and Undo brings it all
   back. Tick **Show roles & tabs** (off by default) to add two columns showing
   every role they're in — the seat they hold marked "(seat)" plus every slate —
@@ -146,10 +157,11 @@ CSV and become available everywhere, including rule builders and filters.
   ⋯ → *Import & merge* or just drag the .xlsx onto the app; the same review +
   error report applies. No extra software is bundled — the app reads and writes
   xlsx itself.
-- **Share one board.** ⋯ → *Share / export a board* exports a single board
-  (its roles, the people on those slates, nothing else) as a planner CSV — the
-  other person opens it in their own copy and sees only that board — or as an
-  Excel workbook. When they send it back, *Import & merge* calculates what's
+- **Share one board — or several.** ⋯ → *Share / export a board* exports
+  **Everything** by default; flip the switch off and tick exactly the board
+  tabs you want to hand over (their roles, the people on those slates, nothing
+  else) as a planner CSV — the other person opens it in their own copy and
+  sees only those boards — or as an Excel workbook. When they send it back, *Import & merge* calculates what's
   new or changed against your database and shows it in the review before
   anything is applied. Deletions don't sync — remove records in the master.
 - **Give them the program too.** In the same Share drawer, tick *Also download
@@ -180,8 +192,10 @@ CSV and become available everywhere, including rule builders and filters.
     locked while the existing data doesn't fit it, and numeric-looking fields
     like postal codes can deliberately stay Text. "+ Add field" on any person
     or role also asks for the type right there.
-  - **Bulk add fields**: paste one field per line (`Name, type, applies to`)
-    to set up many columns at once.
+  - **Add a field**: a one-at-a-time form — name, type, who it applies to,
+    press *+ Add Field* and it's live immediately. **Bulk add** sits below it
+    for setting up many columns at once (one per line: `Name, type, applies
+    to`), and the built-in field table now lives at the bottom.
 
 ## Appearance (the 🎨 button)
 

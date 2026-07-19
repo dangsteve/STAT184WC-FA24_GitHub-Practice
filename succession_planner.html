@@ -75,8 +75,37 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
 .tab-add:hover{color:var(--primary)}
 
 /* ---------- filters ---------- */
-.filters{display:grid;grid-template-columns:minmax(220px,2.2fr) repeat(4,minmax(120px,1fr));gap:8px;padding:10px 20px;background:#fafbfd;border-top:1px solid var(--line2)}
+.filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 20px;background:#fafbfd;border-top:1px solid var(--line2)}
+.filters .search-wrap{flex:0 1 320px;min-width:200px}
 .filters select,.filters input{padding:7px 10px;font-size:12.5px}
+/* --- filter chips (add / remove, multiselect) --- */
+.fchip-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.fchip{position:relative;display:inline-flex;align-items:stretch;background:var(--card);border:1px solid var(--line);border-radius:999px;overflow:visible}
+.fchip.active{border-color:var(--blue);background:var(--blue-bg,#eaf2fd)}
+.fchip-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 4px 5px 11px;font-size:12px;color:var(--ink);border-radius:999px 0 0 999px;white-space:nowrap;cursor:pointer}
+.fchip-btn .caret{font-size:9px;color:var(--muted)}
+.fchip-btn:hover{background:var(--line2)}
+.fchip-x{padding:5px 9px 5px 5px;font-size:10px;color:var(--muted);border-radius:0 999px 999px 0;cursor:pointer}
+.fchip-x:hover{color:var(--red)}
+.fchip-add{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;font-size:12px;color:var(--blue);border:1px dashed var(--line);border-radius:999px;background:transparent;cursor:pointer}
+.fchip-add:hover{border-color:var(--blue);background:var(--blue-bg,#eaf2fd)}
+.fchip-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:70;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(16,24,40,.14);padding:9px;min-width:190px;max-width:260px;max-height:270px;overflow:auto}
+.fchip-pop label{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--ink);margin:3px 0;text-transform:none;letter-spacing:0;cursor:pointer}
+.fchip-pop label input{width:auto}
+.fchip-pop-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--line2)}
+.fchip-pop .linklike{color:var(--blue);font-size:11px;cursor:pointer;background:none;border:none;padding:0}
+.fchip-pop .linklike:hover{text-decoration:underline}
+.fchip-pop .pop-group{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin:7px 0 3px}
+.fchip-pop .pop-field{display:block;width:100%;text-align:left;padding:5px 7px;font-size:12px;border-radius:7px;cursor:pointer}
+.fchip-pop .pop-field:hover{background:var(--line2)}
+/* --- toggle switch --- */
+.switch{position:relative;display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none;font-size:12px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch .knob{flex:0 0 auto;width:30px;height:17px;border-radius:999px;background:var(--line);position:relative;transition:background .15s ease}
+.switch .knob::after{content:'';position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.28);transition:left .15s ease}
+.switch input:checked+.knob{background:var(--blue)}
+.switch input:checked+.knob::after{left:15px}
+.switch:hover .knob{filter:brightness(.96)}
 .search-wrap{position:relative}
 .search-wrap svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--faint)}
 .search-wrap input{padding-left:30px}
@@ -391,10 +420,7 @@ html[data-theme="ocean"]{--primary:#0e7490;--primary-700:#0b5c73;--primary-50:#e
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="search" data-input="render" placeholder="Search roles, people, IDs, departments&hellip;">
     </div>
-    <select id="levelFilter" data-change="filter"><option>All Levels</option></select>
-    <select id="deptFilter" data-change="filter"><option>All Departments</option></select>
-    <select id="riskFilter" data-change="filter"><option>All Risks</option></select>
-    <select id="readinessFilter" data-change="filter"><option>All Readiness</option></select>
+    <div id="filterChips" class="fchip-row"></div>
   </section>
 </header>
 <div id="banner"></div>
@@ -412,10 +438,10 @@ html[data-theme="ocean"]{--primary:#0e7490;--primary-700:#0b5c73;--primary-50:#e
     <div class="side-block">
       <div class="side-title">Candidate Box</div>
       <div class="hint" style="margin-bottom:8px">Drag a candidate onto a role, or click to open the profile.</div>
-      <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:7px;margin-bottom:9px">
-        <input id="pieceSearch" data-input="pieceBox" placeholder="Search candidates&hellip;">
-        <select id="pieceDept" data-change="pieceFilter"><option>All Departments</option></select>
+      <div style="margin-bottom:7px">
+        <input id="pieceSearch" data-input="pieceBox" placeholder="Search candidates&hellip;" style="width:100%">
       </div>
+      <div id="pieceFilters" class="fchip-row" style="margin-bottom:9px"></div>
       <div id="pieceBox" class="piecebox"></div>
     </div>
     <div class="side-block">
@@ -798,6 +824,8 @@ function loadCSV(text){
   const extraCols=headers.filter(h=>h&&!CSV_HEADERS.includes(h));
   const grabExtras=o=>extraCols.length?Object.fromEntries(extraCols.map(h=>[h,o[h]||''])):undefined;
   boards=systemBoards();roles=[];people=[];successors=[];rules=[];history=[];messages=[];customFieldValues={};chessDefaultFields=null;fieldTypes={};treeView=null;insightWidgets=[];
+  roleFilters=[{field:'level',values:[]},{field:'department',values:[]},{field:'risk',values:[]},{field:'readiness',values:[]}];
+  pieceFilters=[{field:'department',values:[]}];filterPop=null;
   rows.slice(1).forEach(row=>{
     const o={};headers.forEach((h,i)=>o[h]=row[i]||'');
     if(!Object.values(o).some(x=>String(x).trim()))return;
@@ -1184,17 +1212,86 @@ function render(){
   if(chess)renderChessView();
 }
 function setView(title,hint,actions=''){el('viewTitle').textContent=title;el('viewHint').innerHTML=hint||'';el('viewActions').innerHTML=actions||''}
+/* ---------- filter chips: add / remove / multiselect ----------
+   roleFilters drive the boards, Insights and the Candidates tab;
+   pieceFilters drive the Candidate Box. values=[] means "All".
+   Custom fields are only offered while at least one record has a value. */
+let roleFilters=[{field:'level',values:[]},{field:'department',values:[]},{field:'risk',values:[]},{field:'readiness',values:[]}];
+let pieceFilters=[{field:'department',values:[]}];
+let filterPop=null; // {scope:'role'|'piece', field} — field '__add__' = the "+ Filter" list
+const ROLE_FILTER_FIELDS=[['level','Level'],['department','Department'],['risk','Risk'],['readiness','Readiness'],['criticality','Criticality'],['status','Status'],['owner','Owner']];
+const PIECE_FILTER_FIELDS=[['department','Department'],['readiness','Readiness'],['candidateType','Candidate Type'],['source','Source'],['location','Location'],['jobLevel','Job Level'],['performance','Performance'],['potential','Potential'],['retentionRisk','Retention Risk'],['mobility','Mobility'],['confidence','Confidence']];
+function filtersOf(scope){return scope==='role'?roleFilters:pieceFilters}
+function filterBuiltins(scope){return scope==='role'?ROLE_FILTER_FIELDS:PIECE_FILTER_FIELDS}
+function filterFieldLabel(scope,field){return (filterBuiltins(scope).find(([f])=>f===field)||[])[1]||field}
+function customFilterFields(scope){
+  const list=scope==='role'?roles:people;
+  const names=new Set();
+  list.forEach(e=>Object.entries(e._x||{}).forEach(([k,val])=>{if(String(val??'').trim())names.add(k)}));
+  return [...names].sort((a,b)=>a.localeCompare(b));
+}
+function filterValueChoices(scope,field){
+  if(scope==='role'&&field==='level')return levels();
+  if(field==='department')return departments();
+  if(scope==='role'&&field==='readiness')return [...valuesForField('readiness',['Ready Now','1-2 Years','3-5 Years']),'No Candidate'];
+  const builtin=filterBuiltins(scope).some(([f])=>f===field);
+  const vals=new Set();
+  (scope==='role'?roles:people).forEach(e=>{const raw=builtin?e[field]:(e._x||{})[field];const s=String(raw??'').trim();if(s)vals.add(s)});
+  if(builtin)valuesForField(field,[]).forEach(x=>{const s=String(x??'').trim();if(s)vals.add(s)});
+  return [...vals].sort((a,b)=>String(a).localeCompare(String(b)));
+}
+function filterChipHtml(scope,f){
+  const label=filterFieldLabel(scope,f.field);
+  const txt=!f.values.length?'All':f.values.length===1?f.values[0]:`${f.values[0]} +${f.values.length-1}`;
+  const open=filterPop&&filterPop.scope===scope&&filterPop.field===f.field;
+  return `<div class="fchip ${f.values.length?'active':''}">
+    <button type="button" class="fchip-btn" data-action="fchipOpen" data-scope="${scope}" data-field="${attr(f.field)}">${esc(label)}: <b>${esc(txt)}</b> <span class="caret">&#9662;</span></button>
+    <button type="button" class="fchip-x" data-action="fchipRemove" data-scope="${scope}" data-field="${attr(f.field)}" title="Remove this filter">&#10005;</button>
+    ${open?filterPopHtml(scope,f):''}
+  </div>`;
+}
+function filterPopHtml(scope,f){
+  const choices=filterValueChoices(scope,f.field);
+  const sel=new Set(f.values);
+  return `<div class="fchip-pop">
+    <div class="fchip-pop-head"><span>${plur(choices.length,'value')} — pick any</span><button type="button" class="linklike" data-action="fchipClear" data-scope="${scope}" data-field="${attr(f.field)}">All (clear)</button></div>
+    ${choices.map(c=>{const id=checkboxId();return `<label for="${id}"><input id="${id}" type="checkbox" class="fchipVal" data-scope="${scope}" data-field="${attr(f.field)}" value="${attr(c)}" ${sel.has(c)?'checked':''}>${esc(c)}</label>`}).join('')||'<div class="hint">No values in the data yet.</div>'}
+  </div>`;
+}
+function filterAddPopHtml(scope){
+  const active=new Set(filtersOf(scope).map(f=>f.field));
+  const builtins=filterBuiltins(scope).filter(([f])=>!active.has(f));
+  const customs=customFilterFields(scope).filter(f=>!active.has(f)&&!filterBuiltins(scope).some(([b])=>b===f));
+  const btn=(f,label)=>`<button type="button" class="pop-field" data-action="fchipAddField" data-scope="${scope}" data-field="${attr(f)}">${esc(label)}</button>`;
+  return `<div class="fchip-pop">
+    ${builtins.length?`<div class="pop-group">Fields</div>${builtins.map(([f,l])=>btn(f,l)).join('')}`:''}
+    ${customs.length?`<div class="pop-group">Custom fields (with values)</div>${customs.map(f=>btn(f,f)).join('')}`:''}
+    ${!builtins.length&&!customs.length?'<div class="hint">Every available field is already a filter. Custom fields appear here once at least one record has a value.</div>':''}
+  </div>`;
+}
+function filterBarHtml(scope){
+  const addOpen=filterPop&&filterPop.scope===scope&&filterPop.field==='__add__';
+  return filtersOf(scope).map(f=>filterChipHtml(scope,f)).join('')+
+    `<div class="fchip" style="border:none;background:none"><button type="button" class="fchip-add" data-action="fchipAdd" data-scope="${scope}">+ Filter</button>${addOpen?filterAddPopHtml(scope):''}</div>`;
+}
 function fillFilters(){
-  const lf=el('levelFilter'),df=el('deptFilter'),pd=el('pieceDept'),rf=el('riskFilter'),rd=el('readinessFilter');
-  const keep=(sel,val,fallback)=>{sel.value=[...sel.options].some(o=>o.value===val)?val:fallback};
-  const lv=lf.value,dv=df.value,pv=pd.value,rv=rf.value,rdv=rd.value;
-  const opt=x=>`<option>${esc(x)}</option>`;
-  lf.innerHTML=opt('All Levels')+levels().map(opt).join('');
-  df.innerHTML=opt('All Departments')+departments().map(opt).join('');
-  pd.innerHTML=opt('All Departments')+departments().map(opt).join('');
-  rf.innerHTML=opt('All Risks')+valuesForField('risk',['High','Medium','Low']).map(opt).join('');
-  rd.innerHTML=opt('All Readiness')+valuesForField('readiness',['Ready Now','1-2 Years','3-5 Years']).map(opt).join('')+opt('No Candidate');
-  keep(lf,lv,'All Levels');keep(df,dv,'All Departments');keep(pd,pv,'All Departments');keep(rf,rv,'All Risks');keep(rd,rdv,'All Readiness');
+  const fc=el('filterChips'),pf=el('pieceFilters');
+  if(fc)fc.innerHTML=filterBarHtml('role');
+  if(pf)pf.innerHTML=filterBarHtml('piece');
+}
+function filterFieldValOf(scope,rec,field){
+  const builtin=filterBuiltins(scope).some(([f])=>f===field);
+  return String((builtin?rec[field]:(rec._x||{})[field])??'').trim();
+}
+function passesFilters(scope,rec,byRole){
+  return filtersOf(scope).every(f=>{
+    if(!f.values.length)return true;
+    if(scope==='role'&&f.field==='readiness'){
+      const ss=(byRole&&byRole.get(rec.id))||successors.filter(s=>s.roleId===rec.id);
+      return f.values.some(val=>val==='No Candidate'?ss.length===0:ss.some(s=>s.readiness===val));
+    }
+    return f.values.includes(filterFieldValOf(scope,rec,f.field));
+  });
 }
 function renderTabs(){
   const customs=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id));
@@ -1211,7 +1308,7 @@ function renderStats(){
     `<div class="stat"><b>${successors.filter(s=>s.approved).length}</b><span>Approved</span></div>`;
 }
 function filteredRoles(){
-  const q=norm(v('search')),lf=v('levelFilter'),rf=v('riskFilter'),read=v('readinessFilter'),df=v('deptFilter');
+  const q=norm(v('search'));
   const boardObj=boards.find(b=>b.id===activeTab);
   const pIdx=new Map(people.map(p=>[p.id,p]));
   const nm=id=>pIdx.get(id)?.name||'';
@@ -1221,8 +1318,7 @@ function filteredRoles(){
     const ss=byRole.get(r.id)||[];
     const txt=[r.id,r.title,r.level,r.department,r.incumbentName,nm(r.incumbentPersonId),ss.map(s=>nm(s.personId)).join(' ')].join(' ').toLowerCase();
     const onBoard=SYSTEM_BOARDS.includes(activeTab)||r.boardId===activeTab||boardObj?.name===r.department;
-    const rr=read==='All Readiness'||(read==='No Candidate'?ss.length===0:ss.some(s=>s.readiness===read));
-    return onBoard&&txt.includes(q)&&(lf==='All Levels'||r.level===lf)&&(rf==='All Risks'||r.risk===rf)&&(df==='All Departments'||r.department===df)&&rr;
+    return onBoard&&txt.includes(q)&&passesFilters('role',r,byRole);
   });
 }
 function emptyState(big,small,buttons=''){return `<div class="empty"><div class="big">${big}</div><div>${small}</div>${buttons}</div>`}
@@ -1415,10 +1511,11 @@ function applyInferredLines(){
 
 /* ---------- people ---------- */
 function renderPeople(){
-  const whereToggle=`<label class="hint" style="display:inline-flex;align-items:center;gap:6px;margin-right:10px;cursor:pointer;user-select:none"><input type="checkbox" id="peopleWhereFlag" ${peopleShowWhere?'checked':''}> Show roles &amp; tabs</label>`;
+  const whereToggle=`<label class="switch" id="peopleWhereSwitch" style="margin-right:10px"><input type="checkbox" id="peopleWhereFlag" ${peopleShowWhere?'checked':''}><span class="knob"></span> Show roles &amp; tabs</label>`;
   setView('Candidates','Every person is stored once by Person ID — edits update all slates that reference them.',whereToggle+(locked('addPeople')?'':`<button class="btn btn-green btn-sm" data-action="openPersonDrawerNew">+ Add Candidate</button>`));
-  const q=norm(v('search')),d=v('deptFilter');
-  const list=people.filter(p=>[p.id,p.name,p.title,p.department,p.location,p.readiness,p.candidateType,p.skills].join(' ').toLowerCase().includes(q)&&(d==='All Departments'||p.department===d));
+  const q=norm(v('search'));
+  const df=roleFilters.find(f=>f.field==='department');
+  const list=people.filter(p=>[p.id,p.name,p.title,p.department,p.location,p.readiness,p.candidateType,p.skills].join(' ').toLowerCase().includes(q)&&(!df||!df.values.length||df.values.includes(String(p.department||'').trim())));
   const boardName=id=>boards.find(b=>b.id===id)?.name;
   const capList=a=>a.length?esc(a.slice(0,3).join(', '))+(a.length>3?` <span class="hint">+${a.length-3} more</span>`:''):'—';
   const rows=list.slice(0,LIST_CAP).map(p=>{
@@ -1547,12 +1644,12 @@ function renderInsights(){
 
 /* ---------- sidebar ---------- */
 function renderPieceBox(){
-  const q=norm(v('pieceSearch')),d=v('pieceDept');
+  const q=norm(v('pieceSearch'));
   let html='';
   if(selectedPersonId&&person(selectedPersonId)){
     html+=`<div class="selected-banner"><span><b>${esc(personName(selectedPersonId))}</b> selected — use "+" on a role card</span><button class="icon-btn" data-action="clearSelection" title="Clear selection">&#10005;</button></div>`;
   }
-  const list=people.filter(p=>[p.id,p.name,p.title,p.department,p.location,p.skills].join(' ').toLowerCase().includes(q)&&(d==='All Departments'||p.department===d));
+  const list=people.filter(p=>[p.id,p.name,p.title,p.department,p.location,p.skills].join(' ').toLowerCase().includes(q)&&passesFilters('piece',p));
   html+=list.slice(0,PIECE_CAP).map(p=>`<div class="piece ${selectedPersonId===p.id?'selected':''}" draggable="true" data-drag="person" data-person-id="${attr(p.id)}" data-action="openPerson">
       ${avatarHtml(p.name,30)}
       <div style="min-width:0;flex:1">
@@ -2400,6 +2497,11 @@ const ACTIONS={
   closeDrawer:()=>closeDrawer(),
   goBack:()=>goBack(),
   deletePerson:d=>deletePerson(d.personId),
+  fchipOpen:d=>{filterPop=(filterPop&&filterPop.scope===d.scope&&filterPop.field===d.field)?null:{scope:d.scope,field:d.field};fillFilters()},
+  fchipAdd:d=>{filterPop=(filterPop&&filterPop.scope===d.scope&&filterPop.field==='__add__')?null:{scope:d.scope,field:'__add__'};fillFilters()},
+  fchipAddField:d=>{filtersOf(d.scope).push({field:d.field,values:[]});filterPop={scope:d.scope,field:d.field};if(d.scope==='role')render();else{fillFilters();renderPieceBox()}},
+  fchipRemove:d=>{const arr=filtersOf(d.scope);const i=arr.findIndex(f=>f.field===d.field);if(i>-1)arr.splice(i,1);if(filterPop&&filterPop.scope===d.scope&&filterPop.field===d.field)filterPop=null;if(d.scope==='role')render();else{fillFilters();renderPieceBox()}},
+  fchipClear:d=>{const f=filtersOf(d.scope).find(x=>x.field===d.field);if(f)f.values=[];if(d.scope==='role')render();else{fillFilters();renderPieceBox()}},
   deleteRole:d=>deleteRole(d.roleId),
   deleteRule:d=>deleteRule(d.ruleId),
   addCandidateFromRole:d=>openPersonDrawer('',d.roleId||'','Successor'),
@@ -2440,6 +2542,7 @@ document.addEventListener('click',e=>{
   const menu=el('moreMenu');
   if(menu.classList.contains('open')&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');
   if(chess&&chess.menuOpen&&!e.target.closest('.chess-fields-wrap')){chess.menuOpen=false;renderChessView()}
+  if(filterPop&&!e.target.closest('.fchip')){filterPop=null;fillFilters()}
   if(!elm)return;
   const lk=LOCK_ACTIONS[elm.dataset.action];
   if(lk&&locked(lk)){e.preventDefault();lockNotice(lk);return}
@@ -2450,6 +2553,12 @@ document.addEventListener('change',e=>{
   const t=e.target;
   if(t.dataset.change==='filter')return render();
   if(t.dataset.change==='pieceFilter')return renderPieceBox();
+  if(t.classList.contains('fchipVal')){
+    const f=filtersOf(t.dataset.scope).find(x=>x.field===t.dataset.field);
+    if(f){const s=new Set(f.values);if(t.checked)s.add(t.value);else s.delete(t.value);f.values=[...s]}
+    if(t.dataset.scope==='role')render();else{fillFilters();renderPieceBox()}
+    return;
+  }
   if(t.dataset.change==='customSelect')return handleCustomSelect(t);
   if(t.dataset.change==='ruleToggle')return toggleRule(t.dataset.ruleId,t.checked);
   if(t.dataset.change==='chessField')return chessToggleField(t.dataset.field);
@@ -2460,6 +2569,7 @@ document.addEventListener('change',e=>{
   if(t.classList.contains('rpAll')){const picker=t.closest('.value-picker');picker.querySelectorAll('.'+t.dataset.cls).forEach(cb=>{if(cb.closest('label').style.display!=='none')cb.checked=t.checked});return}
   if(t.id==='fieldScopeMode')return el('fieldScopeBox')?.classList.toggle('hidden',t.value!=='some');
   if(t.id==='shareProgram')return el('shareProgOpts')?.classList.toggle('hidden',!t.checked);
+  if(t.id==='shareAll')return el('shareBoardsBox')?.classList.toggle('hidden',t.checked);
   if(t.id==='peopleWhereFlag'){peopleShowWhere=t.checked;try{localStorage.setItem(PEOPLE_WHERE_KEY,peopleShowWhere?'1':'0')}catch(err){}return renderPeople()}
   if(t.id==='chessRoleSwitch')return chessGoTo(t.value);
   if(t.id==='ruleType')return updateRuleTypeUI();
@@ -3204,39 +3314,45 @@ function pickImportFiles(){
 }
 
 /* ---------- share / scoped export ---------- */
-function buildScopedData(tabId){
-  if(tabId==='ALL')return{boards:deepClone(boards),people:deepClone(people),roles:deepClone(roles),successors:deepClone(successors),rules:deepClone(rules),history:[],customFieldValues:deepClone(customFieldValues),chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS};
-  const b=boards.find(x=>x.id===tabId);
-  if(!b)return null;
-  const rolesSub=roles.filter(r=>r.boardId===tabId||b.name===r.department);
+function buildScopedData(scope){
+  const ids=Array.isArray(scope)?scope:[scope]; // one board id, several, or 'ALL'
+  if(ids.includes('ALL'))return{boards:deepClone(boards),people:deepClone(people),roles:deepClone(roles),successors:deepClone(successors),rules:deepClone(rules),history:[],customFieldValues:deepClone(customFieldValues),chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS};
+  const bs=ids.map(id=>boards.find(x=>x.id===id)).filter(Boolean);
+  if(!bs.length)return null;
+  const rolesSub=roles.filter(r=>bs.some(b=>r.boardId===b.id||b.name===r.department));
   const rids=new Set(rolesSub.map(r=>r.id));
   const succSub=successors.filter(s=>rids.has(s.roleId));
   const pids=new Set([...rolesSub.map(r=>r.incumbentPersonId),...succSub.map(s=>s.personId)].filter(Boolean));
-  return{boards:[deepClone(b)],people:deepClone(people.filter(p=>pids.has(p.id))),roles:deepClone(rolesSub),successors:deepClone(succSub),rules:[],history:[],customFieldValues:deepClone(customFieldValues),chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS};
+  return{boards:deepClone(bs),people:deepClone(people.filter(p=>pids.has(p.id))),roles:deepClone(rolesSub),successors:deepClone(succSub),rules:[],history:[],customFieldValues:deepClone(customFieldValues),chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS};
 }
 function openShareDrawer(){
   const customs=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id));
   const progSection=anyLocks()
     ?'<div class="form-note" style="margin-top:14px">This is a restricted shared copy of the planner — it can share data files, but not the program itself.</div>'
     :`<div class="rule-section" style="margin-top:14px"><h3>Give them the program too?</h3>
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="shareProgram"> <span>Also download a copy of the planner itself (an HTML file) — they just open it in Chrome or Edge, nothing to install</span></label>
+      <label class="switch" id="shareProgramSwitch"><input type="checkbox" id="shareProgram"><span class="knob"></span> <span>Also download a copy of the planner itself (an HTML file) — they just open it in Chrome or Edge, nothing to install</span></label>
       <div id="shareProgOpts" class="hidden" style="margin-top:10px">
         <div class="hint" style="margin-bottom:6px">By default their copy is the <b>full program</b>. Uncheck anything they should not be able to do — it is switched off inside their copy:</div>
         ${Object.entries(LOCK_INFO).map(([k,label])=>`<label style="display:block;margin:4px 0;cursor:pointer"><input type="checkbox" class="shareFeature" value="${attr(k)}" checked> ${esc(label)}</label>`).join('')}
         <div class="hint" style="margin-top:6px">Your eligibility and block rules still run in their copy either way — unchecking Rules hides the tab and stops edits, it never turns enforcement off.</div>
       </div>
     </div>`;
-  openDrawer('Share / Export a Board','Export one board (its roles, the people on those slates, and their slate rows) to hand to someone else. When they send it back, use Import & merge — new and changed records are calculated against your database.',
+  openDrawer('Share / Export a Board','Export one board or several (their roles, the people on those slates, and their slate rows) to hand to someone else. When they send it back, use Import & merge — new and changed records are calculated against your database.',
     `<div class="grid">
-      <div><label>What to export</label><select id="shareScope"><option value="ALL">Everything (all boards)</option>${customs.map(b=>`<option value="${attr(b.id)}">${esc(b.name)} board only</option>`).join('')}</select></div>
+      <div><label>What to export</label>
+        <label class="switch" id="shareAllSwitch" style="margin:7px 0 4px"><input type="checkbox" id="shareAll" checked><span class="knob"></span> Everything (all boards)</label>
+        <div id="shareBoardsBox" class="hidden value-picker" style="margin-top:6px">${customs.length?customs.map(b=>{const id=checkboxId();return `<label for="${id}"><input id="${id}" type="checkbox" class="shareBoardCheck" value="${attr(b.id)}">${esc(b.name)}</label>`}).join(''):'<div class="hint">No custom board tabs yet — Everything is the only choice.</div>'}</div>
+      </div>
       <div><label>Format</label><select id="shareFormat"><option value="csv">Planner CSV (opens in this app)</option><option value="xlsx">Excel workbook (tabs, easy to read)</option></select></div>
     </div>`+progSection+
     `<div class="form-note" style="margin-top:14px"><b>How the round trip works:</b> the other person opens the CSV in their own copy of the planner (they will only see this board) or edits the Excel tabs directly. When they return the file, use ⋯ &rarr; Import &amp; merge — you get a review of everything new or changed, with an error report for anything broken, before it touches your database. Deletions don&rsquo;t sync — remove records here in the master.</div>`,
     ()=>{
-      const scope=v('shareScope'),fmt=v('shareFormat');
-      const data=buildScopedData(scope);
+      const fmt=v('shareFormat');
+      const scopeIds=(el('shareAll')&&el('shareAll').checked)?['ALL']:checkedValues('shareBoardCheck');
+      if(!scopeIds.length){notice('ERR','Pick at least one board to share — or switch "Everything" back on.');return}
+      const data=buildScopedData(scopeIds);
       if(!data){notice('ERR','Board not found.');return}
-      const label=scope==='ALL'?'all_boards':scope.toLowerCase().replace(/[^a-z0-9]+/g,'_');
+      const label=scopeIds.includes('ALL')?'all_boards':scopeIds.length===1?scopeIds[0].toLowerCase().replace(/[^a-z0-9]+/g,'_'):scopeIds.length+'_boards';
       const wantProgram=!anyLocks()&&el('shareProgram')&&el('shareProgram').checked;
       let progHtml=null,lockedCount=0;
       if(wantProgram){
@@ -3249,7 +3365,7 @@ function openShareDrawer(){
       if(fmt==='xlsx')downloadBytes(`succession_share_${label}.xlsx`,makeXlsx(workbookSheets(data)),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       else download(`succession_share_${label}.csv`,toCSV(data),'text/csv');
       if(progHtml)setTimeout(()=>download('succession_planner_shared.html',progHtml,'text/html'),500);
-      log('Board Shared',`Exported ${scope==='ALL'?'all boards':boards.find(x=>x.id===scope)?.name||scope} as ${fmt.toUpperCase()}`+(progHtml?` + program copy (${lockedCount?lockedCount+' feature(s) off':'full'})`:''));
+      log('Board Shared',`Exported ${scopeIds.includes('ALL')?'all boards':scopeIds.map(id=>boards.find(x=>x.id===id)?.name||id).join(', ')} as ${fmt.toUpperCase()}`+(progHtml?` + program copy (${lockedCount?lockedCount+' feature(s) off':'full'})`:''));
       notice('OK',progHtml?'Share file exported — the program copy downloads right behind it.':'Share file exported.');
       closeDrawer();
     });
@@ -3341,8 +3457,19 @@ function openDataTools(){
         <div class="choice-card"><h3>Excel &rarr; Planner CSV</h3><div class="hint">Upload a workbook (People / Roles / Candidates / Boards tabs). You get the usual review and error report, then the converted CSV downloads.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="convertXlsx">Upload .xlsx&hellip;</button></div></div>
         <div class="choice-card"><h3>Planner CSV &rarr; Excel</h3><div class="hint">Upload a planner CSV and download it as an Excel workbook with tabs.</div><div style="margin-top:10px"><button class="btn btn-quiet" data-action="convertCsv">Upload .csv&hellip;</button></div></div>
       </div></div>
+    <div class="rule-section"><h3>Add a Field</h3><div class="hint" style="margin-bottom:8px">Add custom fields one at a time — pick the type (like a cell format in Excel) and who it applies to. It appears on the forms and becomes a CSV column when a value is saved.</div>
+      <div class="grid" style="align-items:end">
+        <div><label>Field name</label><input id="dtFieldName" placeholder="e.g. Compa-Ratio"></div>
+        <div><label>Type</label><select id="dtFieldType"><option value="text">Text</option><option value="number">Number</option><option value="boolean">True / False</option></select></div>
+        <div><label>Applies to</label><select id="dtFieldOn"><option>all</option><option>person</option><option>role</option><option>candidate</option></select></div>
+        <div><button type="button" class="btn btn-green" data-action="dtAddField">+ Add Field</button></div>
+      </div>
+    </div>
     <div class="rule-section"><h3>Custom Field Types</h3><div class="hint" style="margin-bottom:8px">A type is locked when the existing values don&rsquo;t fit it (letters can never become a Number) — and numeric-looking fields like postal codes may stay Text on purpose. Number fields accept ranges like 2-5 and unlock the greater/less-than rule operators.</div>
-      ${fields.length?`<div class="tablebox"><table class="table"><thead><tr><th>Field</th><th>Type</th><th>Applies to</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="hint">No custom fields yet — bulk-add some below or use “+ Add field” on any person/role.</div>'}
+      ${fields.length?`<div class="tablebox"><table class="table"><thead><tr><th>Field</th><th>Type</th><th>Applies to</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="hint">No custom fields yet — add one above, or use “+ Add field” on any person/role.</div>'}
+    </div>
+    <div class="rule-section"><h3>Bulk Add Fields</h3><div class="hint" style="margin-bottom:8px">Setting up many at once? One field per line: <b>Name, type, applies to</b> — type is text / number / boolean, applies-to is person / role / candidate / all (both optional). Added when you press Save Field Changes.</div>
+      <textarea id="bulkFields" placeholder="Bonus Target, number, person&#10;Remote OK, boolean, person&#10;Cost Center"></textarea>
     </div>
     <div class="rule-section"><h3>Built-in Field Types</h3><div class="hint" style="margin-bottom:8px">The standard fields can be re-typed too — e.g. if you change every Readiness value to numbers or ranges (2-5), you can make it a Number and use greater/less-than rules on it. Locked options mean the current data doesn&rsquo;t fit yet.</div>
       <div class="tablebox"><table class="table"><thead><tr><th>Field</th><th>Type</th><th></th></tr></thead><tbody>${BUILTIN_TYPABLE.map(name=>{
@@ -3351,9 +3478,6 @@ function openDataTools(){
         const opt=(val,label,ok)=>`<option value="${val}" ${cur===val?'selected':''} ${ok?'':'disabled'}>${label}${ok?'':' — locked by existing data'}</option>`;
         return `<tr><td><b>${esc(name)}</b><div class="hint">${a.count?plur(a.count,'value')+' · e.g. '+esc(a.samples.join(', ')):'no values yet'}</div></td><td><select class="ftType" data-field="${attr(name)}" data-builtin="1">${opt('text','Text',true)+opt('number','Number',a.number)+opt('boolean','True / False',a.boolean)}</select></td><td class="hint">built-in</td></tr>`;
       }).join('')}</tbody></table></div>
-    </div>
-    <div class="rule-section"><h3>Bulk Add Fields</h3><div class="hint" style="margin-bottom:8px">One field per line: <b>Name, type, applies to</b> — type is text / number / boolean, applies-to is person / role / candidate / all (both optional).</div>
-      <textarea id="bulkFields" placeholder="Bonus Target, number, person&#10;Remote OK, boolean, person&#10;Cost Center"></textarea>
     </div>`,
     ()=>saveDataTools(),'');
   el('drawerSave').textContent='Save Field Changes';
@@ -3557,6 +3681,20 @@ Object.assign(ACTIONS,{
   shareExport:()=>{el('moreMenu').classList.remove('open');openShareDrawer()},
   importSheets:()=>{el('moreMenu').classList.remove('open');pickImportFiles()},
   dataTools:()=>{el('moreMenu').classList.remove('open');openDataTools()},
+  dtAddField:()=>{
+    const name=v('dtFieldName').trim().replace(/["\r\n]/g,'');
+    const type=v('dtFieldType'),on=v('dtFieldOn');
+    if(!name){notice('ERR','Give the field a name first.');return}
+    if(CSV_HEADERS.includes(name)||BUILTIN_TYPABLE.includes(name)){notice('ERR',`"${name}" is a built-in field — set its type in the Built-in table at the bottom.`);return}
+    if(fieldTypes[name]){notice('ERR',`"${name}" already exists — its type is in the table below.`);return}
+    const a=allowedTypesFor(name);
+    if((type==='number'&&!a.number)||(type==='boolean'&&!a.boolean)){notice('ERR',`"${name}" can’t be ${type} — existing values don’t fit. Fix the data first.`);return}
+    pushUndo('Add field');
+    fieldTypes[name]={type,on};
+    log('Field Added',`${name} (${type}, applies to ${on})`);
+    notice('OK',`Field "${name}" added as ${type==='boolean'?'True / False':type}.`);
+    openDataTools();
+  },
   convertXlsx:()=>pickConvertXlsx(),
   convertCsv:()=>pickConvertCsv(),
   addWidget:()=>openWidgetDrawer(),
@@ -3626,9 +3764,11 @@ function buildProgramCopy(locks){
 if(locked('tools'))document.querySelectorAll('[data-action="dataTools"],[data-action="importSheets"],[data-action="downloadSheetTemplates"]').forEach(x=>x.style.display='none');
 render();
 checkBackup().then(()=>{if(!roles.length&&!people.length)setStatus('Ready — open your CSV database or add records.')});
-Object.assign(window.__APP__,{buildProgramCopy,locked,lockNotice});
+Object.assign(window.__APP__,{buildProgramCopy,locked,lockNotice,filterValueChoices,customFilterFields,fillFilters,passesFilters});
 Object.defineProperty(window.__APP__,'programLocks',{get:()=>PROGRAM_LOCKS});
 Object.defineProperty(window.__APP__,'peopleShowWhere',{get:()=>peopleShowWhere});
+Object.defineProperty(window.__APP__,'roleFilters',{get:()=>roleFilters});
+Object.defineProperty(window.__APP__,'pieceFilters',{get:()=>pieceFilters});
 </script>
 </body>
 </html>
