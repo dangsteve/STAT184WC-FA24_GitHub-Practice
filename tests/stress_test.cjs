@@ -2385,6 +2385,8 @@ function parseCsvRows(text) {
     const total = await page.locator('.role').count();
     await page.click('.fchip-add[data-scope="role"]');
     assert(await page.evaluate(() => !!document.querySelector('[data-action="fchipAddField"][data-scope="role"][data-field="criticality"]')), 'criticality offered in the + Filter list');
+    // regression: the popover must be opaque (it once rendered transparent over the board)
+    assertEq(await page.evaluate(() => getComputedStyle(document.querySelector('.fchip-pop')).backgroundColor), 'rgb(255, 255, 255)', 'popover has a solid background');
     await page.click('[data-action="fchipAddField"][data-scope="role"][data-field="criticality"]');
     await page.click('.fchip-pop .fchipVal[data-scope="role"][data-field="criticality"][value="High"]');
     const expected = await page.evaluate(() => __APP__.roles.filter(r => r.criticality === 'High').length);
@@ -2477,21 +2479,31 @@ function parseCsvRows(text) {
     assert(await page.evaluate(() => !!document.querySelector('#drawerBody .extraField[data-extra-key="Compa-Ratio"]')), 'typed field appears on the person form');
     await page.evaluate(() => __APP__.closeDrawer());
   });
-  await test('flags render as real toggle switches', async () => {
+  await test('flags render as the same green pill switches the Rules list uses', async () => {
     await loadBase(page);
     await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
     const sw = await page.evaluate(() => {
       const label = document.getElementById('peopleWhereSwitch');
-      return { isSwitch: label.classList.contains('switch'), knob: !!label.querySelector('.knob'), rawHidden: getComputedStyle(label.querySelector('input')).opacity === '0' };
+      const input = label.querySelector('input.switch');
+      const cs = input ? getComputedStyle(input) : null;
+      return { wrapped: label.classList.contains('switchline'), pill: !!input, appearance: cs && (cs.appearance || cs.webkitAppearance) };
     });
-    assert(sw.isSwitch && sw.knob, 'Show roles & tabs uses the switch component');
-    assert(sw.rawHidden, 'the raw checkbox is hidden behind the knob');
+    assert(sw.wrapped && sw.pill, 'Show roles & tabs uses the input.switch pill (same as Rules)');
+    assertEq(sw.appearance, 'none', 'checkbox is drawn as a pill, not a raw box');
     await page.click('#peopleWhereSwitch');
     assert(await page.evaluate(() => document.getElementById('peopleWhereFlag').checked), 'clicking the switch toggles it on');
+    assertEq(await page.evaluate(() => getComputedStyle(document.getElementById('peopleWhereFlag')).backgroundColor), 'rgb(26, 127, 75)', 'ON is the same green as the Rules toggles');
     await page.click('#peopleWhereSwitch');
     assert(!(await page.evaluate(() => document.getElementById('peopleWhereFlag').checked)), 'and off again');
     await page.evaluate(() => __APP__.openShareDrawer());
-    assert(await page.evaluate(() => !!document.querySelector('#shareAllSwitch .knob') && !!document.querySelector('#shareProgramSwitch .knob')), 'share drawer switches too');
+    const share = await page.evaluate(() => ({
+      all: !!document.querySelector('#shareAllSwitch input.switch'),
+      prog: !!document.querySelector('#shareProgramSwitch input.switch'),
+      // regression: the share drawer label text must lay out beside the pill, not in a 34px column
+      labelW: document.getElementById('shareProgramSwitch').getBoundingClientRect().width,
+    }));
+    assert(share.all && share.prog, 'share drawer uses the same switches');
+    assert(share.labelW > 200, 'switch labels take their full width (share drawer was once crushed to 34px)');
     await page.evaluate(() => __APP__.closeDrawer());
   });
 

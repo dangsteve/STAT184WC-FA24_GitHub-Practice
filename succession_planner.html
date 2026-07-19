@@ -80,32 +80,27 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
 .filters select,.filters input{padding:7px 10px;font-size:12.5px}
 /* --- filter chips (add / remove, multiselect) --- */
 .fchip-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-.fchip{position:relative;display:inline-flex;align-items:stretch;background:var(--card);border:1px solid var(--line);border-radius:999px;overflow:visible}
-.fchip.active{border-color:var(--blue);background:var(--blue-bg,#eaf2fd)}
+.fchip{position:relative;display:inline-flex;align-items:stretch;background:var(--surface);border:1px solid var(--line);border-radius:999px;overflow:visible}
+.fchip.active{border-color:var(--primary);background:var(--blue-bg)}
 .fchip-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 4px 5px 11px;font-size:12px;color:var(--ink);border-radius:999px 0 0 999px;white-space:nowrap;cursor:pointer}
 .fchip-btn .caret{font-size:9px;color:var(--muted)}
 .fchip-btn:hover{background:var(--line2)}
 .fchip-x{padding:5px 9px 5px 5px;font-size:10px;color:var(--muted);border-radius:0 999px 999px 0;cursor:pointer}
 .fchip-x:hover{color:var(--red)}
-.fchip-add{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;font-size:12px;color:var(--blue);border:1px dashed var(--line);border-radius:999px;background:transparent;cursor:pointer}
-.fchip-add:hover{border-color:var(--blue);background:var(--blue-bg,#eaf2fd)}
-.fchip-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:70;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(16,24,40,.14);padding:9px;min-width:190px;max-width:260px;max-height:270px;overflow:auto}
+.fchip-add{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;font-size:12px;color:var(--primary);border:1px dashed var(--line);border-radius:999px;background:transparent;cursor:pointer}
+.fchip-add:hover{border-color:var(--primary);background:var(--blue-bg)}
+.fchip-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:70;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(16,24,40,.14);padding:9px;min-width:190px;max-width:260px;max-height:270px;overflow:auto}
 .fchip-pop label{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--ink);margin:3px 0;text-transform:none;letter-spacing:0;cursor:pointer}
 .fchip-pop label input{width:auto}
 .fchip-pop-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--line2)}
-.fchip-pop .linklike{color:var(--blue);font-size:11px;cursor:pointer;background:none;border:none;padding:0}
+.fchip-pop .linklike{color:var(--primary);font-size:11px;cursor:pointer;background:none;border:none;padding:0}
 .fchip-pop .linklike:hover{text-decoration:underline}
 .fchip-pop .pop-group{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin:7px 0 3px}
 .fchip-pop .pop-field{display:block;width:100%;text-align:left;padding:5px 7px;font-size:12px;border-radius:7px;cursor:pointer}
 .fchip-pop .pop-field:hover{background:var(--line2)}
-/* --- toggle switch --- */
-.switch{position:relative;display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none;font-size:12px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0}
-.switch input{position:absolute;opacity:0;width:0;height:0}
-.switch .knob{flex:0 0 auto;width:30px;height:17px;border-radius:999px;background:var(--line);position:relative;transition:background .15s ease}
-.switch .knob::after{content:'';position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.28);transition:left .15s ease}
-.switch input:checked+.knob{background:var(--blue)}
-.switch input:checked+.knob::after{left:15px}
-.switch:hover .knob{filter:brightness(.96)}
+/* --- labeled toggle: reuses the input.switch pill the Rules list uses --- */
+.switchline{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:12px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0;margin-bottom:0}
+.switchline input.switch{width:34px}
 .search-wrap{position:relative}
 .search-wrap svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--faint)}
 .search-wrap input{padding-left:30px}
@@ -1511,7 +1506,7 @@ function applyInferredLines(){
 
 /* ---------- people ---------- */
 function renderPeople(){
-  const whereToggle=`<label class="switch" id="peopleWhereSwitch" style="margin-right:10px"><input type="checkbox" id="peopleWhereFlag" ${peopleShowWhere?'checked':''}><span class="knob"></span> Show roles &amp; tabs</label>`;
+  const whereToggle=`<label class="switchline" id="peopleWhereSwitch" style="display:inline-flex;margin-right:10px"><input type="checkbox" class="switch" id="peopleWhereFlag" ${peopleShowWhere?'checked':''}> Show roles &amp; tabs</label>`;
   setView('Candidates','Every person is stored once by Person ID — edits update all slates that reference them.',whereToggle+(locked('addPeople')?'':`<button class="btn btn-green btn-sm" data-action="openPersonDrawerNew">+ Add Candidate</button>`));
   const q=norm(v('search'));
   const df=roleFilters.find(f=>f.field==='department');
@@ -3330,17 +3325,17 @@ function openShareDrawer(){
   const progSection=anyLocks()
     ?'<div class="form-note" style="margin-top:14px">This is a restricted shared copy of the planner — it can share data files, but not the program itself.</div>'
     :`<div class="rule-section" style="margin-top:14px"><h3>Give them the program too?</h3>
-      <label class="switch" id="shareProgramSwitch"><input type="checkbox" id="shareProgram"><span class="knob"></span> <span>Also download a copy of the planner itself (an HTML file) — they just open it in Chrome or Edge, nothing to install</span></label>
+      <label class="switchline" id="shareProgramSwitch"><input type="checkbox" class="switch" id="shareProgram"> <span style="flex:1">Also download a copy of the planner itself (an HTML file) — they just open it in Chrome or Edge, nothing to install</span></label>
       <div id="shareProgOpts" class="hidden" style="margin-top:10px">
         <div class="hint" style="margin-bottom:6px">By default their copy is the <b>full program</b>. Uncheck anything they should not be able to do — it is switched off inside their copy:</div>
-        ${Object.entries(LOCK_INFO).map(([k,label])=>`<label style="display:block;margin:4px 0;cursor:pointer"><input type="checkbox" class="shareFeature" value="${attr(k)}" checked> ${esc(label)}</label>`).join('')}
+        ${Object.entries(LOCK_INFO).map(([k,label])=>`<label style="display:flex;align-items:center;gap:8px;margin:5px 0;cursor:pointer;font-size:12.5px;font-weight:500;color:var(--ink);text-transform:none;letter-spacing:0"><input type="checkbox" class="shareFeature" value="${attr(k)}" checked style="width:auto"> ${esc(label)}</label>`).join('')}
         <div class="hint" style="margin-top:6px">Your eligibility and block rules still run in their copy either way — unchecking Rules hides the tab and stops edits, it never turns enforcement off.</div>
       </div>
     </div>`;
   openDrawer('Share / Export a Board','Export one board or several (their roles, the people on those slates, and their slate rows) to hand to someone else. When they send it back, use Import & merge — new and changed records are calculated against your database.',
     `<div class="grid">
       <div><label>What to export</label>
-        <label class="switch" id="shareAllSwitch" style="margin:7px 0 4px"><input type="checkbox" id="shareAll" checked><span class="knob"></span> Everything (all boards)</label>
+        <label class="switchline" id="shareAllSwitch" style="margin:7px 0 4px"><input type="checkbox" class="switch" id="shareAll" checked> Everything (all boards)</label>
         <div id="shareBoardsBox" class="hidden value-picker" style="margin-top:6px">${customs.length?customs.map(b=>{const id=checkboxId();return `<label for="${id}"><input id="${id}" type="checkbox" class="shareBoardCheck" value="${attr(b.id)}">${esc(b.name)}</label>`}).join(''):'<div class="hint">No custom board tabs yet — Everything is the only choice.</div>'}</div>
       </div>
       <div><label>Format</label><select id="shareFormat"><option value="csv">Planner CSV (opens in this app)</option><option value="xlsx">Excel workbook (tabs, easy to read)</option></select></div>
