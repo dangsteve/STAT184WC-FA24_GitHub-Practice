@@ -1787,11 +1787,12 @@ function personForm(p){
 function personSlateSection(pid){
   const cur=currentRoleForPerson(pid);
   const slates=successors.filter(s=>s.personId===pid).sort((a,b)=>(+a.ranking||999)-(+b.ranking||999));
+  const tabOf=r=>{const b=r&&boards.find(x=>x.id===r.boardId);return b?` · <span class="hint">${esc(b.name)} tab</span>`:''};
   let html=`<div class="drawer-section-title">Where this person appears</div>`;
-  html+=`<div class="panel">${cur?`Current incumbent of <b>${esc(cur.title)}</b> (${esc(cur.id)})`:'Not currently an incumbent of any role.'}</div>`;
+  html+=`<div class="panel">${cur?`Current incumbent of <b>${esc(cur.title)}</b> (${esc(cur.id)})${tabOf(cur)}`:'Not currently an incumbent of any role.'}</div>`;
   html+=slates.length?slates.map(s=>{
     const r=role(s.roleId);
-    return `<div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span>#${esc(s.ranking)} on <b>${esc(r?.title||s.roleId)}</b> · ${esc(s.readiness||'')}${s.approved?' · <span class="badge green">Approved</span>':''}${s.autoMoveQueued?' · <span class="badge amber">Queued</span>':''}</span><span style="display:flex;gap:6px"><button class="btn btn-quiet btn-sm" data-action="openRole" data-role-id="${attr(s.roleId)}">Open role</button><button class="btn btn-danger btn-sm" data-action="personSlateRemove" data-succ-id="${attr(s.id)}" data-person-id="${attr(pid)}">Remove</button></span></div>`;
+    return `<div class="panel" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span>#${esc(s.ranking)} on <b>${esc(r?.title||s.roleId)}</b>${tabOf(r)} · ${esc(s.readiness||'')}${s.approved?' · <span class="badge green">Approved</span>':''}${s.autoMoveQueued?' · <span class="badge amber">Queued</span>':''}</span><span style="display:flex;gap:6px"><button class="btn btn-quiet btn-sm" data-action="openRole" data-role-id="${attr(s.roleId)}">Open role</button><button class="btn btn-danger btn-sm" data-action="personSlateRemove" data-succ-id="${attr(s.id)}" data-person-id="${attr(pid)}">Remove</button></span></div>`;
   }).join(''):'<div class="hint" style="margin-bottom:6px">Not on any succession slate yet — drag them onto a role from the Candidate Box.</div>';
   return html;
 }
@@ -3431,6 +3432,23 @@ function suggestedScope(name){
   const hits=[inP&&'person',inR&&'role',inS&&'candidate'].filter(Boolean);
   return hits.length===1?hits[0]:'all';
 }
+function deleteCustomField(name){
+  if(CSV_HEADERS.includes(name)||BUILTIN_TYPABLE.includes(name)){notice('ERR','Built-in fields cannot be deleted.');return}
+  const usedByRule=rules.find(r=>r.type==='FIELD_RULE'&&ruleConditions(r).some(c=>c.field===name));
+  if(usedByRule){notice('ERR',`"${name}" is used by the rule "${usedByRule.name||usedByRule.id}" — edit or delete that rule first.`);return}
+  const usedByWidget=(insightWidgets||[]).find(w=>w.field===name||(w.filter&&w.filter.field===name));
+  if(usedByWidget){notice('ERR',`"${name}" is used by the dashboard widget "${usedByWidget.title||usedByWidget.kind}" — remove that widget first.`);return}
+  const holders=[...people,...roles,...successors].filter(e=>e._x&&(name in e._x)&&String(e._x[name]??'').trim()).length;
+  if(!confirm(`Delete the field "${name}" for everyone?\n\n${holders?plur(holders,'record')+' currently have a value — those values are removed too.':'No record currently has a value.'} The column disappears from the CSV on the next save. You can Undo this.`))return;
+  pushUndo('Delete field');
+  [people,roles,successors].forEach(list=>list.forEach(e=>{if(e._x)delete e._x[name]}));
+  delete fieldTypes[name];
+  delete customFieldValues[name];
+  roleFilters=roleFilters.filter(f=>f.field!==name);pieceFilters=pieceFilters.filter(f=>f.field!==name);
+  log('Field Deleted',`${name}${holders?' — values cleared from '+plur(holders,'record'):''}`);
+  notice('OK',`Field "${name}" deleted everywhere${holders?' — '+plur(holders,'value')+' removed':''}.`);
+  render();openDataTools();
+}
 function openDataTools(){
   const fields=allExtraFieldNames();
   const rows=fields.map(name=>{
@@ -3439,7 +3457,8 @@ function openDataTools(){
     const opt=(val,label,ok)=>`<option value="${val}" ${cur===val?'selected':''} ${ok?'':'disabled'}>${label}${ok?'':' — locked by existing data'}</option>`;
     return `<tr><td><b>${esc(name)}</b><div class="hint">${a.count?plur(a.count,'value')+' · e.g. '+esc(a.samples.join(', ')):'no values yet'}</div></td>
       <td><select class="ftType" data-field="${attr(name)}">${opt('text','Text',true)+opt('number','Number',a.number)+opt('boolean','True / False',a.boolean)}</select></td>
-      <td><select class="ftOn" data-field="${attr(name)}">${['all','person','role','candidate'].map(o=>`<option ${on===o?'selected':''}>${o}</option>`).join('')}</select></td></tr>`;
+      <td><select class="ftOn" data-field="${attr(name)}">${['all','person','role','candidate'].map(o=>`<option ${on===o?'selected':''}>${o}</option>`).join('')}</select></td>
+      <td style="text-align:center"><button type="button" class="icon-btn bad" data-action="dtDeleteField" data-field="${attr(name)}" title="Delete ${attr(name)} everywhere — removes every value and its CSV column">&#10005;</button></td></tr>`;
   }).join('');
   openDrawer('Data Tools','Everything for moving data in and out, plus custom field types.',
     `<div class="rule-section"><h3>Import &amp; Share</h3>
@@ -3461,7 +3480,7 @@ function openDataTools(){
       </div>
     </div>
     <div class="rule-section"><h3>Custom Field Types</h3><div class="hint" style="margin-bottom:8px">A type is locked when the existing values don&rsquo;t fit it (letters can never become a Number) — and numeric-looking fields like postal codes may stay Text on purpose. Number fields accept ranges like 2-5 and unlock the greater/less-than rule operators.</div>
-      ${fields.length?`<div class="tablebox"><table class="table"><thead><tr><th>Field</th><th>Type</th><th>Applies to</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="hint">No custom fields yet — add one above, or use “+ Add field” on any person/role.</div>'}
+      ${fields.length?`<div class="tablebox"><table class="table"><thead><tr><th>Field</th><th>Type</th><th>Applies to</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="hint">No custom fields yet — add one above, or use “+ Add field” on any person/role.</div>'}
     </div>
     <div class="rule-section"><h3>Bulk Add Fields</h3><div class="hint" style="margin-bottom:8px">Setting up many at once? One field per line: <b>Name, type, applies to</b> — type is text / number / boolean, applies-to is person / role / candidate / all (both optional). Added when you press Save Field Changes.</div>
       <textarea id="bulkFields" placeholder="Bonus Target, number, person&#10;Remote OK, boolean, person&#10;Cost Center"></textarea>
@@ -3676,6 +3695,7 @@ Object.assign(ACTIONS,{
   shareExport:()=>{el('moreMenu').classList.remove('open');openShareDrawer()},
   importSheets:()=>{el('moreMenu').classList.remove('open');pickImportFiles()},
   dataTools:()=>{el('moreMenu').classList.remove('open');openDataTools()},
+  dtDeleteField:d=>deleteCustomField(d.field),
   dtAddField:()=>{
     const name=v('dtFieldName').trim().replace(/["\r\n]/g,'');
     const type=v('dtFieldType'),on=v('dtFieldOn');

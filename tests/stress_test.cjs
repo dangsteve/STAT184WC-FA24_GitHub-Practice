@@ -2507,6 +2507,81 @@ function parseCsvRows(text) {
     await page.evaluate(() => __APP__.closeDrawer());
   });
 
+  await test('custom field ✕ deletes it for everyone: values wiped, CSV column gone, undoable', async () => {
+    await loadBase(page);
+    await page.evaluate(() => {
+      __APP__.fieldTypes['Scratch Field'] = { type: 'text', on: 'person' };
+      __APP__.people[0]._x = { ...(__APP__.people[0]._x || {}), 'Scratch Field': 'keep-me' };
+      __APP__.people[1]._x = { ...(__APP__.people[1]._x || {}), 'Scratch Field': 'me-too' };
+      __APP__.roles[0]._x = { ...(__APP__.roles[0]._x || {}), 'Scratch Field': 'role-val' };
+      __APP__.render();
+    });
+    assert((await csvOf(page)).includes('Scratch Field'), 'column exists before');
+    await page.evaluate(() => __APP__.openDataTools());
+    dialogs = [];
+    await page.click('[data-action="dtDeleteField"][data-field="Scratch Field"]');
+    assert(dialogs.some(d => d.type === 'confirm' && d.message.includes('3 records')), 'confirm counts the records holding a value');
+    const after = await page.evaluate(() => ({
+      reg: 'Scratch Field' in __APP__.fieldTypes,
+      vals: [...__APP__.people, ...__APP__.roles].filter(e => e._x && 'Scratch Field' in e._x).length,
+    }));
+    assertEq(after.reg, false, 'registry entry gone');
+    assertEq(after.vals, 0, 'every value wiped');
+    const csvAfter = await csvOf(page);
+    assert(!csvAfter.split('\n')[0].includes('Scratch Field'), 'CSV column gone from the header');
+    assert(!csvAfter.includes('keep-me') && !csvAfter.includes('role-val'), 'every value gone from the CSV (history keeps the audit line)');
+    await page.evaluate(() => { __APP__.closeDrawer(); __APP__.undoLastAction(); });
+    const undone = await page.evaluate(() => ({
+      val: (__APP__.people[0]._x || {})['Scratch Field'],
+      reg: 'Scratch Field' in __APP__.fieldTypes,
+    }));
+    assertEq(undone.val, 'keep-me', 'Undo brings the values back');
+    assert(undone.reg, 'and the field definition');
+  });
+  await test('a field used by a rule or widget cannot be deleted (clear message instead)', async () => {
+    await loadBase(page);
+    await page.evaluate(() => {
+      __APP__.fieldTypes['Guarded'] = { type: 'text', on: 'person' };
+      __APP__.people[0]._x = { ...(__APP__.people[0]._x || {}), 'Guarded': 'x' };
+      __APP__.rules.push({ id: 'RULE-GF', name: 'Guard rule', type: 'FIELD_RULE', scope: 'Candidate', field: 'Guarded', operator: 'equals', value: JSON.stringify([{ field: 'Guarded', operator: 'equals', value: 'x' }]), personId: '', targetRoleId: '', severity: 'Block', message: '', enabled: true });
+      __APP__.fieldTypes['Widgeted'] = { type: 'number', on: 'person' };
+      __APP__.people[1]._x = { ...(__APP__.people[1]._x || {}), 'Widgeted': '4' };
+      __APP__.insightWidgets.push({ id: 'W-GF', title: 'Avg Widgeted', source: 'people', kind: 'avg', field: 'Widgeted' });
+      __APP__.render();
+    });
+    await page.evaluate(() => __APP__.openDataTools());
+    dialogs = [];
+    await page.click('[data-action="dtDeleteField"][data-field="Guarded"]');
+    let msg = await lastMsg(page);
+    assert(msg.type === 'ERR' && msg.message.includes('Guard rule'), 'refused — names the rule using it');
+    await page.click('[data-action="dtDeleteField"][data-field="Widgeted"]');
+    msg = await lastMsg(page);
+    assert(msg.type === 'ERR' && msg.message.includes('Avg Widgeted'), 'refused — names the widget using it');
+    assertEq(dialogs.length, 0, 'no delete confirm was ever shown');
+    const still = await page.evaluate(() => ({ g: 'Guarded' in __APP__.fieldTypes, w: (__APP__.people[1]._x || {})['Widgeted'] }));
+    assert(still.g && still.w === '4', 'both fields untouched');
+    await page.evaluate(() => { __APP__.rules = __APP__.rules.filter(r => r.id !== 'RULE-GF'); __APP__.closeDrawer(); });
+  });
+  await test('person drawer "Where this person appears" names the board tab', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const withTab = __APP__.successors.find(s => { const r = __APP__.roles.find(x => x.id === s.roleId); return r && r.boardId && __APP__.boards.some(b => b.id === r.boardId); });
+      const r = __APP__.roles.find(x => x.id === withTab.roleId);
+      const inc = __APP__.roles.find(x => x.incumbentPersonId && x.boardId && __APP__.boards.some(b => b.id === x.boardId));
+      return {
+        slatePid: withTab.personId, slateTab: __APP__.boards.find(b => b.id === r.boardId).name,
+        incPid: inc.incumbentPersonId, incTab: __APP__.boards.find(b => b.id === inc.boardId).name,
+      };
+    });
+    await page.evaluate(pid => __APP__.openPersonDrawer(pid), t.slatePid);
+    let body = await page.evaluate(() => document.getElementById('drawerBody').textContent);
+    assert(body.includes(`${t.slateTab} tab`), `slate row names its tab ("${t.slateTab} tab")`);
+    await page.evaluate(pid => __APP__.openPersonDrawer(pid), t.incPid);
+    body = await page.evaluate(() => document.getElementById('drawerBody').textContent);
+    assert(body.includes(`${t.incTab} tab`), 'the incumbent line names its tab too');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+
   /* ===================================================================
      24. SCREENSHOTS for the report
      =================================================================== */
