@@ -472,8 +472,15 @@ const CHESS_DEFAULT_FIELDS=['title','readiness','candidateType'];
 const PIECE_SETS={
   classic:{name:'Classic chess',king:'♚',ranks:[['♛','Queen'],['♜','Rook'],['♝','Bishop'],['♞','Knight'],['♟','Pawn']]},
   royal:{name:'Royal court',king:'👑',ranks:[['🏆','Queen'],['🎖️','Rook'],['🛡️','Bishop'],['⚔️','Knight'],['🎗️','Pawn']]},
-  animals:{name:'Animal kingdom',king:'🦁',ranks:[['🦅','Queen'],['🐻','Rook'],['🦊','Bishop'],['🐺','Knight'],['🐭','Pawn']]},
+  animals:{name:'Animal kingdom',king:'🦁',ranks:[['🦅','Queen'],['🐻','Rook'],['🦊','Bishop'],['🐺','Knight'],['🐾','Pawn']]},
   woodland:{name:'Woodland',king:'🌳',ranks:[['🦉','Queen'],['🦌','Rook'],['🦔','Bishop'],['🐿️','Knight'],['🍄','Pawn']]},
+  holiday:{name:'Holiday',king:'🎅',ranks:[['🌟','Queen'],['🎄','Rook'],['⛄','Bishop'],['🦌','Knight'],['🎁','Pawn']]},
+  galaxy:{name:'Galaxy',king:'🪐',ranks:[['🚀','Queen'],['🛸','Rook'],['⭐','Bishop'],['🌙','Knight'],['👾','Pawn']]},
+  robots:{name:'Robot lab',king:'🤖',ranks:[['🦾','Queen'],['⚙️','Rook'],['🔋','Bishop'],['🛠️','Knight'],['🔩','Pawn']]},
+  fantasy:{name:'Fantasy quest',king:'🧙',ranks:[['🐉','Queen'],['🦄','Rook'],['⚔️','Bishop'],['🛡️','Knight'],['🏹','Pawn']]},
+  dinos:{name:'Dinosaurs',king:'🦖',ranks:[['🦕','Queen'],['🐊','Rook'],['🦎','Bishop'],['🐢','Knight'],['🥚','Pawn']]},
+  ocean:{name:'Deep sea',king:'🔱',ranks:[['🐋','Queen'],['🦈','Rook'],['🐬','Bishop'],['🐙','Knight'],['🐟','Pawn']]},
+  champions:{name:'Champions',king:'🏆',ranks:[['🥇','Queen'],['🥈','Rook'],['🥉','Bishop'],['🏅','Knight'],['⚽','Pawn']]},
 };
 const APPEARANCE_KEY='succession_planner_appearance_v1';
 let appearance={theme:'classic',pieces:'classic',board:'classic'};
@@ -1021,12 +1028,17 @@ function evaluateRules(s){
     if(rule.type==='BLOCK'){
       const old=currentRoleForPerson(s.personId),op=rule.operator||'cannot move to target role';
       const personMatches=!rule.personId||rule.personId===s.personId;
-      hit=op==='cannot change role'?(personMatches&&old&&old.id!==s.roleId):(personMatches&&rule.targetRoleId===s.roleId);
+      const targets=String(rule.targetRoleId||'').split('|').filter(Boolean); // one or many target roles
+      hit=op==='cannot change role'?(personMatches&&old&&old.id!==s.roleId):(personMatches&&targets.includes(s.roleId));
     }else if(rule.type==='FIELD_RULE'){
       // eligibility rule: candidates who meet EVERY requirement may move;
-      // the rule fires on anyone who fails at least one
-      const conds=ruleConditions(rule);
-      hit=conds.length&&!conds.every(c=>compare(getFieldValue(p,s,c.field),c.operator,c.value));
+      // the rule fires on anyone who fails at least one.
+      // targetRoleId optionally scopes it to specific roles (empty = all roles)
+      const scope=String(rule.targetRoleId||'').split('|').filter(Boolean);
+      if(!scope.length||scope.includes(s.roleId)){
+        const conds=ruleConditions(rule);
+        hit=conds.length&&!conds.every(c=>compare(getFieldValue(p,s,c.field),c.operator,c.value));
+      }
     }
     if(hit){const msg=rule.message||`${rule.name||'Rule'} triggered`;(rule.severity==='Needs Review'?reviews:blocks).push(msg)}
   });
@@ -1400,9 +1412,11 @@ function renderPeople(){
 
 /* ---------- rules ---------- */
 function ruleSummary(r){
+  const roleNames=ids=>{const names=ids.map(id=>role(id)?.title||id);return names.slice(0,3).join(', ')+(names.length>3?` +${names.length-3} more`:'')};
   if(r.type==='BLOCK'){
     const who=r.personId?personName(r.personId,r.personId):'Any person';
-    return r.operator==='cannot change role'?`${who} cannot change role`:`${who} cannot move to ${role(r.targetRoleId)?.title||r.targetRoleId||'(no target role set)'}`;
+    const targets=String(r.targetRoleId||'').split('|').filter(Boolean);
+    return r.operator==='cannot change role'?`${who} cannot change role`:`${who} cannot move to ${targets.length?roleNames(targets):'(no target role set)'}`;
   }
   if(r.type==='AUTO_BACKFILL'){
     const cfg=autoRuleConfig(r);
@@ -1410,7 +1424,9 @@ function ruleSummary(r){
     return `Backfill vacant roles from type: ${(cfg.autoTypes||[]).join(', ')||'?'}`;
   }
   const conds=ruleConditions(r);
-  return conds.length?'Eligible only if '+conds.map(c=>`${c.field} ${c.operator} ${String(c.value||'').split('|').join(', ')}`).join(' AND '):'—';
+  const scope=String(r.targetRoleId||'').split('|').filter(Boolean);
+  return (conds.length?'Eligible only if '+conds.map(c=>`${c.field} ${c.operator} ${String(c.value||'').split('|').join(', ')}`).join(' AND '):'—')
+    +(r.type==='FIELD_RULE'&&scope.length?` — only for ${roleNames(scope)}`:'');
 }
 function renderRulesPage(){
   setView('Rules','Rules run when candidates are approved or auto-moved. Eligibility rules let only candidates who meet every requirement move — everyone else is blocked or flagged. Priority: Block / Eligibility rules → Auto Backfill → Auto Move queue.',`<button class="btn btn-green btn-sm" data-action="openRuleDrawerNew">+ New Rule</button>`);
@@ -1750,7 +1766,7 @@ function renameRoleRefs(oldId,newId){
   successors.forEach(s=>{if(s.roleId===oldId)s.roleId=newId});
   roles.forEach(r=>{if(r.managerRoleId===oldId)r.managerRoleId=newId});
   rules.forEach(r=>{
-    if(r.targetRoleId===oldId)r.targetRoleId=newId;
+    if(r.targetRoleId&&String(r.targetRoleId).split('|').includes(oldId))r.targetRoleId=String(r.targetRoleId).split('|').map(x=>x===oldId?newId:x).join('|');
     if(r.type==='AUTO_BACKFILL'){const cfg=safeJSON(r.value,null);if(cfg&&Array.isArray(cfg.customMappings)){let hit=false;cfg.customMappings.forEach(m=>{if(m.roleId===oldId){m.roleId=newId;hit=true}});if(hit)r.value=JSON.stringify(cfg)}}
   });
   if(importBaseline){importBaseline.successors.forEach(s=>{if(s.roleId===oldId)s.roleId=newId});importBaseline.roles.forEach(r=>{if(r.id===oldId)r.id=newId;if(r.managerRoleId===oldId)r.managerRoleId=newId})}
@@ -1903,6 +1919,13 @@ function customMapRowHtml(m={roleId:'',personId:''}){
   </div>`;
 }
 function addCustomMapRow(m){el('customMapRows').insertAdjacentHTML('beforeend',customMapRowHtml(m))}
+function rolesCheckboxPicker(cls,selected){
+  const sel=new Set(selected||[]);
+  const allId=checkboxId();
+  const rows=roles.map(r=>{const id=checkboxId();return `<label for="${id}" data-rp="${attr(norm(r.title+' '+r.id))}"><input id="${id}" type="checkbox" class="${cls}" value="${attr(r.id)}" ${sel.has(r.id)?'checked':''}>${esc(r.title)}&nbsp;<span class="hint">(${esc(r.id)})</span></label>`}).join('');
+  return `<div class="value-picker"><input class="rpFilter" placeholder="Filter roles&hellip;" style="margin-bottom:6px"><label class="select-all" for="${allId}"><input id="${allId}" type="checkbox" class="rpAll" data-cls="${cls}">Select all shown</label>${rows||'<div class="hint">No roles yet.</div>'}</div>`;
+}
+function checkedValues(cls){return[...document.querySelectorAll('.'+cls)].filter(x=>x.checked).map(x=>x.value)}
 function updateRuleTypeUI(){
   const type=v('ruleType');
   ['blockSection','fieldSection','autoSection'].forEach(x=>el(x)?.classList.add('hidden'));
@@ -1929,14 +1952,18 @@ function openRuleDrawer(id=''){
     <div><label>Enabled</label><select id="ruleEnabled"><option ${r.enabled?'selected':''}>true</option><option ${!r.enabled?'selected':''}>false</option></select></div>
     <div class="full"><label>Callout Message</label><textarea id="ruleMsg" placeholder="Shown when the rule fires">${esc(r.message)}</textarea></div>
   </div>
-  <div id="blockSection" class="rule-section"><h3>Block Rule</h3><div class="hint" style="margin-bottom:8px">Stop a specific person from being approved or auto-moved.</div><div class="grid">
+  <div id="blockSection" class="rule-section"><h3>Block Rule</h3><div class="hint" style="margin-bottom:8px">Stop a specific person from being approved or auto-moved. Pick one target role or several.</div><div class="grid">
     <div><label>Person</label><select id="rulePerson">${rulePersonOptions(r.personId)}</select></div>
     <div><label>Operator</label><select id="ruleBlockOperator"><option value="cannot move to target role" ${r.operator!=='cannot change role'?'selected':''}>cannot move to target role</option><option value="cannot change role" ${r.operator==='cannot change role'?'selected':''}>cannot change role</option></select></div>
-    <div id="targetRoleBox"><label>Target Role</label><select id="ruleTarget">${targetRoleOptions(r.targetRoleId)}</select></div>
+    <div id="targetRoleBox"><label>Target Role(s)</label>${rolesCheckboxPicker('blockTargetCheck',String(r.targetRoleId||'').split('|').filter(Boolean))}</div>
   </div></div>
   <div id="fieldSection" class="rule-section"><h3>Eligibility Requirements</h3><div class="hint" style="margin-bottom:8px">A candidate must meet <b>all</b> of these to be approved or auto-moved — anyone who doesn&rsquo;t is stopped (severity Block) or flagged (Needs Review). Equal / not equal use a dropdown, contains matches partial text, list means any of the checked values. Added values are saved in the CSV for reuse.</div>
     <div id="conditionRows">${conds.map(c=>conditionRowHtml(c)).join('')}</div>
     <button type="button" class="btn btn-green btn-sm" data-action="addConditionRow">+ Add Requirement</button>
+    <div style="margin-top:12px;max-width:420px"><label>Applies To Roles</label>
+      <select id="fieldScopeMode"><option value="all" ${type!=='FIELD_RULE'||!String(r.targetRoleId||'').trim()?'selected':''}>All roles (default)</option><option value="some" ${type==='FIELD_RULE'&&String(r.targetRoleId||'').trim()?'selected':''}>Only selected roles&hellip;</option></select>
+      <div id="fieldScopeBox" class="${type==='FIELD_RULE'&&String(r.targetRoleId||'').trim()?'':'hidden'}" style="margin-top:6px">${rolesCheckboxPicker('fieldScopeCheck',type==='FIELD_RULE'?String(r.targetRoleId||'').split('|').filter(Boolean):[])}</div>
+    </div>
   </div>
   <div id="autoSection" class="rule-section"><h3>Auto Backfill Rule</h3><div class="hint" style="margin-bottom:8px">When a role becomes vacant, the top-ranked slate candidate of this type is auto-moved in. Choose Custom for explicit role-to-person mappings.</div>
     <div style="max-width:320px"><label>Auto Fill From Candidate Type</label><select id="autoTypeSelect">${autoTypeOptions.map(t=>`<option ${t===autoSel?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
@@ -1948,7 +1975,7 @@ function openRuleDrawer(id=''){
 }
 function saveRule(oldId=''){
   const type=v('ruleType');
-  const r={id:v('ruleId').trim()||uid('RULE'),name:v('ruleName'),type,scope:'Candidate',field:'',operator:'',value:'',personId:v('rulePerson'),targetRoleId:v('ruleTarget'),altPersonId:'',severity:v('ruleSeverity')||'Block',message:v('ruleMsg'),enabled:v('ruleEnabled')==='true'};
+  const r={id:v('ruleId').trim()||uid('RULE'),name:v('ruleName'),type,scope:'Candidate',field:'',operator:'',value:'',personId:v('rulePerson'),targetRoleId:'',altPersonId:'',severity:v('ruleSeverity')||'Block',message:v('ruleMsg'),enabled:v('ruleEnabled')==='true'};
   if(r.id!==oldId&&rules.some(x=>x.id===r.id)){notice('ERR',`Rule ID "${r.id}" already exists.`);return}
   const missing=[];
   if(!r.name)r.name=type==='FIELD_RULE'?'Candidate Eligibility Rule':type==='BLOCK'?'Person Movement Block Rule':'Auto Backfill Rule';
@@ -1956,15 +1983,20 @@ function saveRule(oldId=''){
   if(type==='BLOCK'){
     r.severity='Block';
     r.operator=v('ruleBlockOperator')||'cannot move to target role';
+    r.targetRoleId=checkedValues('blockTargetCheck').join('|');
     if(!r.personId)missing.push('Person');
-    if(r.operator==='cannot move to target role'&&!r.targetRoleId)missing.push('Target Role');
+    if(r.operator==='cannot move to target role'&&!r.targetRoleId)missing.push('At least one target role');
     if(r.operator==='cannot change role')r.targetRoleId='';
   }
   if(type==='FIELD_RULE'){
     const conds=[...document.querySelectorAll('#conditionRows .condition-row')].map(row=>({field:row.querySelector('.condField')?.value||'',operator:row.querySelector('.condOperator')?.value||'',value:getConditionValues(row)})).filter(c=>c.field&&c.operator&&c.value);
     if(!conds.length)missing.push('At least one requirement with a value');
     r.field=conds[0]?.field||'';r.operator=conds[0]?.operator||'';r.value=JSON.stringify(conds);
-    r.personId='';r.targetRoleId='';
+    r.personId='';
+    if(v('fieldScopeMode')==='some'){
+      r.targetRoleId=checkedValues('fieldScopeCheck').join('|');
+      if(!r.targetRoleId)missing.push('At least one role to apply to (or switch back to All roles)');
+    }else r.targetRoleId='';
   }
   if(type==='AUTO_BACKFILL'){
     const autoType=v('autoTypeSelect');
@@ -2372,6 +2404,8 @@ document.addEventListener('change',e=>{
   if(t.classList.contains('condOperator'))return resetConditionValue(t);
   if(t.classList.contains('condValueSelect'))return handleRuleValueSelect(t);
   if(t.classList.contains('selAll'))return toggleAllCondValues(t);
+  if(t.classList.contains('rpAll')){const picker=t.closest('.value-picker');picker.querySelectorAll('.'+t.dataset.cls).forEach(cb=>{if(cb.closest('label').style.display!=='none')cb.checked=t.checked});return}
+  if(t.id==='fieldScopeMode')return el('fieldScopeBox')?.classList.toggle('hidden',t.value!=='some');
   if(t.id==='chessRoleSwitch')return chessGoTo(t.value);
   if(t.id==='ruleType')return updateRuleTypeUI();
   if(t.id==='ruleBlockOperator')return updateBlockTargetUI();
@@ -2386,6 +2420,10 @@ document.addEventListener('input',e=>{
     chess.bankQuery=t.value;
     const list=el('chessBankList');
     if(list)list.innerHTML=chessBankListHtml(); // update the list only, so typing keeps focus
+  }
+  if(t.classList.contains('rpFilter')){
+    const q=norm(t.value);
+    t.closest('.value-picker').querySelectorAll('label[data-rp]').forEach(l=>{l.style.display=!q||l.dataset.rp.includes(q)?'':'none'});
   }
 });
 
@@ -2528,6 +2566,7 @@ function detectSheetType(nh){
   const roleRef=['role','role id','roleid','successor role id','successorroleid'].some(has);
   const personRef=['person','person id','personid','candidate'].some(has);
   if(roleRef&&personRef)return 'SLATE';
+  if((has('person id')||has('personid'))&&has('name'))return 'PEOPLE';
   if(has('name')&&(has('readiness')||has('candidate type')||has('email')))return 'PEOPLE';
   if(has('title')&&has('level'))return 'ROLES';
   return null;
@@ -2539,11 +2578,6 @@ const SHEET_ALIASES={
   BOARDS:{'board id':'boardId','boardid':'boardId','board name':'boardName','boardname':'boardName'},
 };
 const PERSON_KEYMAP={personName:'name',personTitle:'title',personDepartment:'department',personEmail:'email',location:'location',jobLevel:'jobLevel',performance:'performance',potential:'potential',retentionRisk:'retentionRisk',mobility:'mobility',criticalExperience:'criticalExperience',skills:'skills',readiness:'readiness',source:'source',candidateType:'candidateType',confidence:'confidence',notes:'notes'};
-function slugIdIn(list,prefix,label){
-  const base=prefix+'-'+(String(label).toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-|-$/g,'')||'X');
-  let id=base,i=2;
-  while(true){const ex=list.find(e=>e.id===id);if(!ex)return id;if(norm(ex.name||ex.title)===norm(label))return id;id=base+'-'+(i++)}
-}
 function buildSheetImport(fileTexts,dbExtras,base){
   const src=base||{people,roles,successors,boards,rules,history,customFieldValues};
   const staged={people:deepClone(src.people||[]),roles:deepClone(src.roles||[]),successors:deepClone(src.successors||[]),boards:deepClone(src.boards||systemBoards()),rules:deepClone(src.rules||[]),history:deepClone(src.history||[]),customFieldValues:deepClone(src.customFieldValues||{})};
@@ -2556,8 +2590,18 @@ function buildSheetImport(fileTexts,dbExtras,base){
       if(err)add(file,row,label,id,k,'WARNING',err,'Imported as-is');
     });
   };
-  const findPerson=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=staged.people.find(p=>p.id===ref);if(hit)return hit;const byName=staged.people.filter(p=>norm(p.name)===norm(ref));return byName.length===1?byName[0]:(byName.length?'AMBIG':null)};
-  const findRole=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=staged.roles.find(r=>r.id===ref);if(hit)return hit;const byTitle=staged.roles.filter(r=>norm(r.title)===norm(ref));return byTitle.length===1?byTitle[0]:(byTitle.length?'AMBIG':null)};
+  // Map indexes keep big merges linear (the 25k-row cap would be quadratic otherwise)
+  const pIdx=new Map(staged.people.map(p=>[p.id,p]));
+  const pByName=new Map();staged.people.forEach(p=>{const k=norm(p.name);(pByName.get(k)||pByName.set(k,[]).get(k)).push(p)});
+  const rIdx=new Map(staged.roles.map(r=>[r.id,r]));
+  const rByTitle=new Map();staged.roles.forEach(r=>{const k=norm(r.title);(rByTitle.get(k)||rByTitle.set(k,[]).get(k)).push(r)});
+  const sByKey=new Map(staged.successors.map(s=>[s.roleId+'||'+s.personId,s]));
+  const maxRank=new Map();staged.successors.forEach(s=>maxRank.set(s.roleId,Math.max(maxRank.get(s.roleId)||0,+s.ranking||0)));
+  const changes=[];
+  const chg=o=>{o.cid='C'+changes.length;changes.push(o)};
+  const slugWith=(idx,prefix,label,sameKey)=>{const b='-'+(String(label).toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-|-$/g,'')||'X');let id=prefix+b,i=2;while(true){const ex=idx.get(id);if(!ex)return id;if(norm(sameKey(ex))===norm(label))return id;id=prefix+b+'-'+(i++)}};
+  const findPerson=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=pIdx.get(ref);if(hit)return hit;const list=[...new Set(pByName.get(norm(ref))||[])].filter(p=>norm(p.name)===norm(ref));return list.length===1?list[0]:(list.length?'AMBIG':null)};
+  const findRole=ref=>{ref=String(ref||'').trim();if(!ref)return null;const hit=rIdx.get(ref);if(hit)return hit;const list=[...new Set(rByTitle.get(norm(ref))||[])].filter(r=>norm(r.title)===norm(ref));return list.length===1?list[0]:(list.length?'AMBIG':null)};
   const knownReadiness=new Set([...valuesForField('readiness',['Ready Now','1-2 Years','3-5 Years'])].map(norm));
 
   const parsed=[];
@@ -2569,6 +2613,7 @@ function buildSheetImport(fileTexts,dbExtras,base){
     const type=detectSheetType(nh);
     if(!type){add(ft.name,1,'?','','','ERROR','Could not tell if this is a People, Roles or Candidates sheet — start from the simple sheet templates','File skipped');continue}
     if(type==='FULL'){add(ft.name,1,'FULL','','','ERROR','This is a full database file — open it with Open CSV instead of merging it','File skipped');continue}
+    if(rows.length-1>MAX_SHEET_ROWS){add(ft.name,1,type,'','','ERROR',`Sheet has ${(rows.length-1).toLocaleString()} data rows — the limit is ${MAX_SHEET_ROWS.toLocaleString()}`,'File skipped — split it into smaller files');continue}
     parsed.push({ft,type,rawHeaders,nh,rows:rows.slice(1)});
   }
   const orderOf={PEOPLE:0,BOARDS:1,ROLES:2,SLATE:3};
@@ -2590,50 +2635,68 @@ function buildSheetImport(fileTexts,dbExtras,base){
       if(sheet.type==='PEOPLE'){
         const name=String(o.personName||'').trim();let id=String(o.personId||'').trim();
         if(!id&&!name){add(sheet.ft.name,rowNum,label,'','','ERROR','Row has neither a Person ID nor a Name','Row skipped');return}
-        if(!id){id=slugIdIn(staged.people,'P',name);add(sheet.ft.name,rowNum,label,id,'personId','WARNING',`No Person ID given for "${name}"`,'Generated '+id)}
-        let p=staged.people.find(e=>e.id===id);
+        if(!id){id=slugWith(pIdx,'P',name,e=>e.name);add(sheet.ft.name,rowNum,label,id,'personId','WARNING',`No Person ID given for "${name}"`,'Generated '+id)}
+        let p=pIdx.get(id);
         if(!p){
           if(!name){add(sheet.ft.name,rowNum,label,id,'personName','ERROR','New person has no Name','Row skipped');return}
-          p={id,name,title:'',department:'',email:'',location:'',jobLevel:'',performance:'',potential:'',retentionRisk:'',mobility:'',criticalExperience:'',skills:'',readiness:'1-2 Years',source:'Internal',candidateType:'Successor',confidence:'Medium',notes:''};
-          staged.people.push(p);stats.peopleAdded++;
+          p={id,name,title:'',department:'',email:'',location:'',jobLevel:'',performance:'',potential:'',retentionRisk:'',mobility:'',criticalExperience:'',skills:'',readiness:'1-2 Years',source:'Internal',candidateType:'Successor',confidence:'Medium',notes:'',__new:true};
+          staged.people.push(p);pIdx.set(id,p);
+          const nk=norm(name);(pByName.get(nk)||pByName.set(nk,[]).get(nk)).push(p);
+          stats.peopleAdded++;chg({t:'add',entity:'person',id,label:name});
         }else stats.peopleUpdated++;
-        Object.entries(PERSON_KEYMAP).forEach(([canon,ek])=>{if(String(o[canon]??'').trim()!=='')p[ek]=o[canon]});
-        if(Object.keys(x).length){p._x={...(p._x||{}),...x};checkTypedExtras(x,sheet.ft.name,rowNum,label,id)}
+        Object.entries(PERSON_KEYMAP).forEach(([canon,ek])=>{
+          const nv=o[canon];
+          if(String(nv??'').trim()===''||String(p[ek]??'')===String(nv))return;
+          if(!p.__new)chg({t:'set',entity:'person',id:p.id,label:p.name||p.id,field:ek,from:p[ek]??'',to:nv});
+          p[ek]=nv;
+          if(ek==='name'){const nk=norm(nv);(pByName.get(nk)||pByName.set(nk,[]).get(nk)).push(p)}
+        });
+        if(Object.keys(x).length){
+          Object.entries(x).forEach(([k,nv])=>{const old=(p._x||{})[k]??'';if(String(old)!==String(nv)&&!p.__new)chg({t:'set',entity:'person',id:p.id,label:p.name||p.id,field:k,x:true,from:old,to:nv})});
+          p._x={...(p._x||{}),...x};
+          checkTypedExtras(x,sheet.ft.name,rowNum,label,id);
+        }
         if(String(o.readiness||'').trim()&&!knownReadiness.has(norm(o.readiness)))add(sheet.ft.name,rowNum,label,id,'readiness','WARNING',`New readiness value "${o.readiness}"`,'Imported as-is');
       }
       if(sheet.type==='ROLES'){
         const title=String(o.roleTitle||'').trim();let id=String(o.roleId||'').trim();
         if(!id&&!title){add(sheet.ft.name,rowNum,label,'','','ERROR','Row has neither a Role ID nor a Role Title','Row skipped');return}
-        if(!id){id=slugIdIn(staged.roles,'R',title);add(sheet.ft.name,rowNum,label,id,'roleId','WARNING',`No Role ID given for "${title}"`,'Generated '+id)}
-        let r=staged.roles.find(e=>e.id===id);
+        if(!id){id=slugWith(rIdx,'R',title,e=>e.title);add(sheet.ft.name,rowNum,label,id,'roleId','WARNING',`No Role ID given for "${title}"`,'Generated '+id)}
+        let r=rIdx.get(id);
         if(!r){
           if(!title){add(sheet.ft.name,rowNum,label,id,'roleTitle','ERROR','New role has no Role Title','Row skipped');return}
-          r={id,title,level:'VP',department:'',boardId:'',managerRoleId:'',incumbentPersonId:'',incumbentName:'VACANT',risk:'Medium',criticality:'Medium',owner:'',status:'Active Plan',sortOrder:staged.roles.length+1};
-          staged.roles.push(r);stats.rolesAdded++;
+          r={id,title,level:'VP',department:'',boardId:'',managerRoleId:'',incumbentPersonId:'',incumbentName:'VACANT',risk:'Medium',criticality:'Medium',owner:'',status:'Active Plan',sortOrder:staged.roles.length+1,__new:true};
+          staged.roles.push(r);rIdx.set(id,r);
+          const tk=norm(title);(rByTitle.get(tk)||rByTitle.set(tk,[]).get(tk)).push(r);
+          stats.rolesAdded++;chg({t:'add',entity:'role',id,label:title});
         }else stats.rolesUpdated++;
-        [['roleTitle','title'],['level','level'],['department','department'],['risk','risk'],['criticality','criticality'],['owner','owner'],['status','status']].forEach(([canon,ek])=>{if(String(o[canon]??'').trim()!=='')r[ek]=o[canon]});
-        if(String(o.sortOrder??'').trim()!=='')r.sortOrder=Number(o.sortOrder)||r.sortOrder;
+        const rset=(field,nv)=>{if(String(r[field]??'')===String(nv))return;if(!r.__new)chg({t:'set',entity:'role',id:r.id,label:r.title||r.id,field,from:r[field]??'',to:nv});r[field]=nv};
+        [['roleTitle','title'],['level','level'],['department','department'],['risk','risk'],['criticality','criticality'],['owner','owner'],['status','status']].forEach(([canon,ek])=>{if(String(o[canon]??'').trim()!=='')rset(ek,o[canon])});
+        if(String(o.sortOrder??'').trim()!==''&&Number(o.sortOrder))rset('sortOrder',Number(o.sortOrder));
+        Object.entries(x).forEach(([k,nv])=>{const old=(r._x||{})[k]??'';if(String(old)!==String(nv)&&!r.__new)chg({t:'set',entity:'role',id:r.id,label:r.title||r.id,field:k,x:true,from:old,to:nv})});
+        if(Object.keys(x).length){r._x={...(r._x||{}),...x};checkTypedExtras(x,sheet.ft.name,rowNum,label,id)}
         if(String(o.managerRoleId??'').trim()!==''){
           const m=findRole(o.managerRoleId);
           if(m==='AMBIG')add(sheet.ft.name,rowNum,label,id,'managerRoleId','WARNING',`"${o.managerRoleId}" matches several roles`,'Manager left unchanged');
-          else if(m){if(m.id!==String(o.managerRoleId).trim())add(sheet.ft.name,rowNum,label,id,'managerRoleId','WARNING',`Manager matched by title: "${o.managerRoleId}"`,'Linked to '+m.id);r.managerRoleId=m.id}
-          else{r.managerRoleId=String(o.managerRoleId).trim();add(sheet.ft.name,rowNum,label,id,'managerRoleId','WARNING',`Manager role "${o.managerRoleId}" not found`,'Kept — the org tree will place this role by level until it exists')}
+          else if(m){if(m.id!==String(o.managerRoleId).trim())add(sheet.ft.name,rowNum,label,id,'managerRoleId','WARNING',`Manager matched by title: "${o.managerRoleId}"`,'Linked to '+m.id);rset('managerRoleId',m.id)}
+          else{rset('managerRoleId',String(o.managerRoleId).trim());add(sheet.ft.name,rowNum,label,id,'managerRoleId','WARNING',`Manager role "${o.managerRoleId}" not found`,'Kept — the org tree will place this role by level until it exists')}
         }
         if(String(o.incumbentRef??'').trim()!==''){
           const ref=String(o.incumbentRef).trim();
-          if(['vacant','none','tbd','open'].includes(norm(ref))){r.incumbentPersonId='';r.incumbentName='VACANT'}
+          const setInc=(pid,pname)=>{if(r.incumbentPersonId===pid)return;if(!r.__new)chg({t:'set',entity:'role',id:r.id,label:r.title||r.id,field:'incumbentPersonId',from:r.incumbentPersonId||'',fromName:r.incumbentName,to:pid,toName:pname});r.incumbentPersonId=pid;r.incumbentName=pname};
+          if(['vacant','none','tbd','open'].includes(norm(ref)))setInc('','VACANT');
           else{
             const ip=findPerson(ref);
             if(ip==='AMBIG')add(sheet.ft.name,rowNum,label,id,'incumbent','WARNING',`"${ref}" matches several people`,'Incumbent left unchanged');
-            else if(ip){if(ip.id!==ref)add(sheet.ft.name,rowNum,label,id,'incumbent','WARNING',`Incumbent matched by name: "${ref}"`,'Linked to '+ip.id);r.incumbentPersonId=ip.id;r.incumbentName=ip.name}
+            else if(ip){if(ip.id!==ref)add(sheet.ft.name,rowNum,label,id,'incumbent','WARNING',`Incumbent matched by name: "${ref}"`,'Linked to '+ip.id);setInc(ip.id,ip.name)}
             else add(sheet.ft.name,rowNum,label,id,'incumbent','ERROR',`Incumbent "${ref}" not found in People`,'Incumbent left unchanged — import the People sheet first or fix the name');
           }
         }
         if(String(o.boardRef??'').trim()!==''){
           const ref=String(o.boardRef).trim();
           let b=staged.boards.find(bb=>bb.id===ref)||staged.boards.find(bb=>norm(bb.name)===norm(ref));
-          if(!b){b={id:/^BOARD-/i.test(ref)?ref.toUpperCase():'BOARD-'+(ref.toUpperCase().replace(/[^A-Z0-9]+/g,'-')||'X'),name:/^BOARD-/i.test(ref)?prettyBoardName(ref):ref};staged.boards.push(b);add(sheet.ft.name,rowNum,label,id,'board','WARNING',`New board tab "${b.name}" was created`,'Check Manage Tabs if unwanted')}
-          r.boardId=b.id;
+          if(!b){b={id:/^BOARD-/i.test(ref)?ref.toUpperCase():'BOARD-'+(ref.toUpperCase().replace(/[^A-Z0-9]+/g,'-')||'X'),name:/^BOARD-/i.test(ref)?prettyBoardName(ref):ref};staged.boards.push(b);chg({t:'add',entity:'board',id:b.id,label:b.name});add(sheet.ft.name,rowNum,label,id,'board','WARNING',`New board tab "${b.name}" was created`,'Check Manage Tabs if unwanted')}
+          rset('boardId',b.id);
         }
       }
       if(sheet.type==='BOARDS'){
@@ -2641,8 +2704,8 @@ function buildSheetImport(fileTexts,dbExtras,base){
         if(!bid&&!bnm)return;
         if(SYSTEM_BOARDS.includes(bid)){add(sheet.ft.name,rowNum,label,bid,'boardId','WARNING','System tab names are reserved','Row skipped');return}
         const ex=staged.boards.find(b=>b.id===bid);
-        if(ex){if(bnm&&ex.name!==bnm){ex.name=bnm;add(sheet.ft.name,rowNum,label,bid,'boardName','INFO','Board renamed','Now "'+bnm+'"')}}
-        else staged.boards.push({id:bid||('BOARD-'+(bnm.toUpperCase().replace(/[^A-Z0-9]+/g,'-')||'X')),name:bnm||prettyBoardName(bid)});
+        if(ex){if(bnm&&ex.name!==bnm){chg({t:'set',entity:'board',id:bid,label:ex.name,field:'name',from:ex.name,to:bnm});ex.name=bnm;add(sheet.ft.name,rowNum,label,bid,'boardName','INFO','Board renamed','Now "'+bnm+'"')}}
+        else{const nb={id:bid||('BOARD-'+(bnm.toUpperCase().replace(/[^A-Z0-9]+/g,'-')||'X')),name:bnm||prettyBoardName(bid)};staged.boards.push(nb);chg({t:'add',entity:'board',id:nb.id,label:nb.name})}
       }
       if(sheet.type==='SLATE'){
         const rRef=findRole(o.roleRef),pRef=findPerson(o.personRef);
@@ -2651,17 +2714,24 @@ function buildSheetImport(fileTexts,dbExtras,base){
         if(pRef==='AMBIG'||!pRef){add(sheet.ft.name,rowNum,label,String(o.personRef),'person','ERROR',pRef?`"${o.personRef}" matches several people`:`Person "${o.personRef}" not found`,'Row skipped — fix the name/ID or import the People sheet first');return}
         if(rRef.id!==String(o.roleRef).trim())add(sheet.ft.name,rowNum,label,rRef.id,'role','WARNING',`Role matched by title: "${o.roleRef}"`,'Linked to '+rRef.id);
         if(pRef.id!==String(o.personRef).trim())add(sheet.ft.name,rowNum,label,pRef.id,'person','WARNING',`Person matched by name: "${o.personRef}"`,'Linked to '+pRef.id);
-        let s=staged.successors.find(e=>e.roleId===rRef.id&&e.personId===pRef.id);
+        const key=rRef.id+'||'+pRef.id;
+        let s=sByKey.get(key);
+        const slabel=`${pRef.name} → ${rRef.title}`;
         if(!s){
-          const maxRank=Math.max(0,...staged.successors.filter(e=>e.roleId===rRef.id).map(e=>+e.ranking||0));
-          s={id:uid('S'),roleId:rRef.id,personId:pRef.id,readiness:pRef.readiness||'1-2 Years',source:pRef.source||'Internal',candidateType:pRef.candidateType||'Successor',confidence:pRef.confidence||'Medium',ranking:maxRank+1,notes:'',approved:false,autoMoveQueued:false};
-          staged.successors.push(s);stats.slateAdded++;
+          const nr=(maxRank.get(rRef.id)||0)+1;maxRank.set(rRef.id,nr);
+          s={id:uid('S'),roleId:rRef.id,personId:pRef.id,readiness:pRef.readiness||'1-2 Years',source:pRef.source||'Internal',candidateType:pRef.candidateType||'Successor',confidence:pRef.confidence||'Medium',ranking:nr,notes:'',approved:false,autoMoveQueued:false,__new:true};
+          staged.successors.push(s);sByKey.set(key,s);
+          stats.slateAdded++;chg({t:'add',entity:'slate',id:s.id,label:slabel});
         }else stats.slateUpdated++;
-        [['readiness','readiness'],['source','source'],['candidateType','candidateType'],['confidence','confidence'],['notes','notes']].forEach(([canon,ek])=>{if(String(o[canon]??'').trim()!=='')s[ek]=o[canon]});
-        if(String(o.ranking??'').trim()!=='')s.ranking=Number(o.ranking)||s.ranking;
-        if(String(o.approved??'').trim()!=='')s.approved=norm(o.approved)==='true';
-        if(String(o.autoMoveQueued??'').trim()!=='')s.autoMoveQueued=norm(o.autoMoveQueued)==='true';
-        if(Object.keys(x).length)s._x={...(s._x||{}),...x};
+        const sset=(field,nv,bool)=>{if(String(s[field]??'')===String(nv))return;if(!s.__new)chg({t:'set',entity:'slate',id:s.id,label:slabel,field,from:s[field]??'',to:nv,bool});s[field]=nv};
+        [['readiness','readiness'],['source','source'],['candidateType','candidateType'],['confidence','confidence'],['notes','notes']].forEach(([canon,ek])=>{if(String(o[canon]??'').trim()!=='')sset(ek,o[canon])});
+        if(String(o.ranking??'').trim()!==''&&Number(o.ranking))sset('ranking',Number(o.ranking));
+        if(String(o.approved??'').trim()!=='')sset('approved',norm(o.approved)==='true',true);
+        if(String(o.autoMoveQueued??'').trim()!=='')sset('autoMoveQueued',norm(o.autoMoveQueued)==='true',true);
+        if(Object.keys(x).length){
+          Object.entries(x).forEach(([k,nv])=>{const old=(s._x||{})[k]??'';if(String(old)!==String(nv)&&!s.__new)chg({t:'set',entity:'slate',id:s.id,label:slabel,field:k,x:true,from:old,to:nv})});
+          s._x={...(s._x||{}),...x};
+        }
       }
     });
   }
@@ -2697,7 +2767,8 @@ function buildSheetImport(fileTexts,dbExtras,base){
   const byRole=new Map();
   staged.successors.forEach(s=>{const a=byRole.get(s.roleId);if(a)a.push(s);else byRole.set(s.roleId,[s])});
   byRole.forEach(a=>a.sort((m,n)=>(+m.ranking||999)-(+n.ranking||999)).forEach((s,i)=>s.ranking=i+1));
-  return{staged,report,stats,files:fileTexts.map(f=>f.name)};
+  staged.people.forEach(p=>delete p.__new);staged.roles.forEach(r=>delete r.__new);staged.successors.forEach(s=>delete s.__new);
+  return{staged,report,stats,changes,files:fileTexts.map(f=>f.name)};
 }
 function startSheetImport(fileTexts,dbExtras){
   if((!fileTexts||!fileTexts.length)&&!dbExtras)return;
@@ -2719,6 +2790,22 @@ function openImportReview(review){
       <div class="kpi"><b style="${s.warnings?'color:var(--amber)':''}">${s.warnings}</b><small>Warnings</small><div class="sub">imported, check them</div></div>
       ${s.other?`<div class="kpi"><b>${s.other}</b><small>Other updates</small><div class="sub">rules, tabs, history, settings</div></div>`:''}
     </div>`+
+    ((!isConvert&&review.changes&&review.changes.length)?(()=>{
+      const entName={person:'Person',role:'Role',slate:'Slate',board:'Board'};
+      const rows=review.changes.slice(0,300).map(c=>{
+        let desc;
+        if(c.t==='add')desc=c.entity==='slate'?'Added to the slate':'New '+(entName[c.entity]||c.entity).toLowerCase()+' added';
+        else{
+          const frm=String(c.from??'')===''?'—':String(c.field==='incumbentPersonId'?(c.fromName||c.from):c.from);
+          desc=`${esc(c.field==='incumbentPersonId'?'incumbent':c.field)}: <span class="hint">“${esc(frm)}”</span> &rarr; `;
+          desc+=(c.bool||typeof c.to==='boolean'||c.field==='incumbentPersonId')
+            ?`<b>${esc(String(c.field==='incumbentPersonId'?(c.toName||c.to||'VACANT'):c.to))}</b>`
+            :`<input class="impEdit" data-cid="${c.cid}" value="${attr(String(c.to??''))}" style="max-width:150px;padding:4px 8px">`;
+        }
+        return `<tr><td><input type="checkbox" class="impChange" data-cid="${c.cid}" checked></td><td>${entName[c.entity]||c.entity}</td><td><b>${esc(c.label)}</b></td><td>${desc}</td></tr>`;
+      }).join('');
+      return `<div class="rule-section"><h3>Changes (${review.changes.length})</h3><div class="hint" style="margin-bottom:8px">Incoming values win and nothing is ever deleted. <b>Uncheck</b> a row to skip that change, or <b>edit the incoming value</b> right here before applying.</div><div class="tablebox"><table class="table"><thead><tr><th>Apply</th><th>Type</th><th>Record</th><th>Change</th></tr></thead><tbody>${rows}</tbody></table>${review.changes.length>300?`<div class="tfoot-note">Showing 300 of ${review.changes.length} — the rest apply as-is.</div>`:''}</div></div>`;
+    })():'')+
     (review.report.length
       ?`<div class="tablebox"><table class="table"><thead><tr><th></th><th>Where</th><th>Sheet</th><th>Record</th><th>Problem</th><th>What was done</th></tr></thead><tbody>${issueRows}</tbody></table>${review.report.length>200?`<div class="tfoot-note">Showing 200 of ${review.report.length} — the downloadable report has everything.</div>`:''}</div>`
       :'<div class="notice ok">No issues found — every row lines up cleanly.</div>'),
@@ -2739,12 +2826,75 @@ function applyImport(){
     closeDrawer();
     return;
   }
+  let skippedChanges=0;
+  if(importReview.changes&&importReview.changes.length){
+    const unchecked=new Set([...document.querySelectorAll('.impChange')].filter(c=>!c.checked).map(c=>c.dataset.cid));
+    const edits=new Map();
+    document.querySelectorAll('.impEdit').forEach(i=>edits.set(i.dataset.cid,i.value));
+    for(const c of importReview.changes){
+      if(c.t!=='set'||unchecked.has(c.cid)||!edits.has(c.cid))continue;
+      const nv=edits.get(c.cid);
+      if(String(nv)===String(c.to??''))continue;
+      const terr=typedValueError(c.field,nv);
+      if(terr){notice('ERR','Fix an edited value first — '+terr);return}
+      if((c.field==='ranking'||c.field==='sortOrder')&&nv.trim()&&isNaN(+nv)){notice('ERR',`"${c.field}" must be a number — got "${nv}".`);return}
+    }
+    const st=importReview.staged;
+    const pIdx=new Map(st.people.map(p=>[p.id,p]));
+    const rIdx=new Map(st.roles.map(r=>[r.id,r]));
+    const sIdx=new Map(st.successors.map(s=>[s.id,s]));
+    const removedP=new Set(),removedR=new Set(),removedB=new Set(),removedS=new Set();
+    importReview.changes.forEach(c=>{
+      if(c.t!=='add'||!unchecked.has(c.cid))return;
+      skippedChanges++;
+      if(c.entity==='person')removedP.add(c.id);
+      else if(c.entity==='role')removedR.add(c.id);
+      else if(c.entity==='board')removedB.add(c.id);
+      else if(c.entity==='slate')removedS.add(c.id);
+    });
+    // new slate rows pointing at a skipped new person/role go with them
+    const realSlateIds=new Set(successors.map(s=>s.id));
+    st.successors.forEach(s=>{
+      if(!realSlateIds.has(s.id)&&(removedP.has(s.personId)||removedR.has(s.roleId)))removedS.add(s.id);
+    });
+    importReview.changes.forEach(c=>{
+      if(c.t!=='set')return;
+      const rec=c.entity==='person'?pIdx.get(c.id):c.entity==='role'?rIdx.get(c.id):c.entity==='slate'?sIdx.get(c.id):null;
+      if(!rec)return;
+      const skip=unchecked.has(c.cid)
+        ||(c.field==='incumbentPersonId'&&removedP.has(c.to))
+        ||(c.field==='managerRoleId'&&removedR.has(c.to))
+        ||(c.field==='boardId'&&removedB.has(c.to));
+      if(skip){
+        skippedChanges++;
+        if(c.x){if(String(c.from??'')==='')delete (rec._x||{})[c.field];else (rec._x=rec._x||{})[c.field]=c.from}
+        else{rec[c.field]=c.from;if(c.field==='incumbentPersonId')rec.incumbentName=c.fromName||'VACANT'}
+      }else if(edits.has(c.cid)&&String(edits.get(c.cid))!==String(c.to??'')){
+        let nv=edits.get(c.cid);
+        if((c.field==='ranking'||c.field==='sortOrder')&&nv.trim()!=='')nv=+nv;
+        if(c.x)(rec._x=rec._x||{})[c.field]=nv;
+        else rec[c.field]=nv;
+      }
+    });
+    if(removedP.size)st.people=st.people.filter(p=>!removedP.has(p.id));
+    if(removedR.size)st.roles=st.roles.filter(r=>!removedR.has(r.id));
+    if(removedB.size)st.boards=st.boards.filter(b=>!removedB.has(b.id));
+    if(removedS.size)st.successors=st.successors.filter(s=>!removedS.has(s.id));
+    if(removedP.size||removedR.size||removedB.size)st.roles.forEach(r=>{
+      if(removedP.has(r.incumbentPersonId)){r.incumbentPersonId='';r.incumbentName='VACANT'}
+      if(removedR.has(r.managerRoleId))r.managerRoleId='';
+      if(removedB.has(r.boardId))r.boardId='';
+    });
+    const byRole=new Map();
+    st.successors.forEach(s=>{const a=byRole.get(s.roleId);if(a)a.push(s);else byRole.set(s.roleId,[s])});
+    byRole.forEach(a=>a.sort((m,n)=>(+m.ranking||999)-(+n.ranking||999)).forEach((s,i)=>s.ranking=i+1));
+  }
   pushUndo('Import sheets');
   people=importReview.staged.people;roles=importReview.staged.roles;successors=importReview.staged.successors;boards=importReview.staged.boards;
   rules=importReview.staged.rules;history=importReview.staged.history;customFieldValues=importReview.staged.customFieldValues;
   const s=importReview.stats;
-  log('Sheets Imported',`${importReview.files.join(', ')} — people +${s.peopleAdded}/upd ${s.peopleUpdated}, roles +${s.rolesAdded}/upd ${s.rolesUpdated}, slate +${s.slateAdded}/upd ${s.slateUpdated}, ${s.errors} errors, ${s.warnings} warnings`);
-  notice(s.errors?'WARN':'OK',s.errors?`Import applied — ${s.errors} row(s) were skipped. Use ⋯ → the error report to fix and re-import them.`:'Import applied cleanly.');
+  log('Sheets Imported',`${importReview.files.join(', ')} — people +${s.peopleAdded}/upd ${s.peopleUpdated}, roles +${s.rolesAdded}/upd ${s.rolesUpdated}, slate +${s.slateAdded}/upd ${s.slateUpdated}, ${s.errors} errors, ${s.warnings} warnings`+(skippedChanges?`, ${skippedChanges} change(s) skipped by reviewer`:''));
+  notice(s.errors?'WARN':'OK',(s.errors?`Import applied — ${s.errors} row(s) were skipped. Use ⋯ → the error report to fix and re-import them.`:'Import applied cleanly.')+(skippedChanges?` ${skippedChanges} change(s) were left out at your request.`:''));
   importReview=null;
   closeDrawer();render();
 }

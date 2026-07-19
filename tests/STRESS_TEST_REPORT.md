@@ -1,6 +1,6 @@
 # Succession Planner — Stress Test Report
 
-**Result: 111 / 111 automated scenarios pass, zero console errors.**
+**Result: 119 / 119 automated scenarios pass, zero console errors.**
 
 The suite (`tests/stress_test.cjs`) drives the real app in headless Chromium via
 Playwright — it clicks the actual buttons, opens the actual drawers, and fires real
@@ -36,6 +36,7 @@ NODE_PATH=$(npm root -g) node tests/stress_test.cjs
 | 18 | Typed rules, caps & dashboard widgets | rule-builder operators follow the field type (no greater-than on text like "Boston"; numbers get greater/less-than with a number input; booleans get equal/not-equal with a true/false select), changing the field resets operator + value and changing the operator clears the value so stale values can never be saved; files over the size caps are rejected with a clear error and the database untouched; the menu is lean — Import & merge and Share live inside Data Tools (no more "developer"); dashboard widgets: filtered KPI count, % of total, bar breakdown and average-of-numeric-field all compute correctly (cross-checked), render on Insights, survive the CSV round-trip, can be removed, and the cap of 8 is enforced |
 | 19 | Typed built-ins, ranges & pie/donut | dash-ranges like `2-5` count as numeric while letters never do; "+ Add field" in a drawer asks for the type (registered with the drawer's scope) and numeric fields validate on save (letters blocked, ranges saved); built-in fields re-type in Data Tools with the same data locks — readiness stays locked while values are words, unlocks on a numeric dataset, then gets greater/less-than rule operators and a typed validated input in the person form, without leaking into Additional Fields; pie & donut widgets group into top-5 + Other with slice counts summing to the total, a labeled legend with counts and percentages (colors from a validator-passed categorical palette), a centre total on donuts only, and full CSV round-trip |
 | 20 | Appearance | the 🎨 panel applies a color theme instantly, persists it per-browser across reloads, and never marks the data unsaved; Woodland pieces + Wood board render on the chess view (tree king, owl queen, mushroom bank pawns, wood squares) and reset cleanly; the palette button also lives in the chess header — the panel opens over the board and pieces/board restyle live behind it while it stays open |
+| 21 | Rule scoping, multi-target blocks, change preview, themes & limits | an eligibility rule scoped to chosen roles (built through the UI: the filter box narrows the list, "select all shown" checks only visible roles) is enforced on the scoped role and ignored everywhere else, persists to the CSV and reads back; a BLOCK rule with several target roles blocks the person on each one, stays free elsewhere, and its pipe-separated list round-trips; a BLOCK save with no target picked is refused with a clear error; the **import change preview** lists every change (old → new) with a checkbox per row — unchecking a field change keeps the old value, unchecking a new person removes them AND their staged slate rows (no dangling references), inline edits of incoming values win over the sheet, edited values must fit the field type (a typed Number field refuses "not a number" but accepts "2-5"), and the apply notice counts the skipped changes; piece themes: 11 sets with no mouse/pig glyphs anywhere, Holiday 🎅 and Galaxy 🪐 kings render live on the board, and every set appears in the panel; **bare limits measured**: a 25,000-row sheet (the documented per-sheet cap) builds its review in ~0.3 s and applies in ~0.2 s, the resulting 25k-person xlsx workbook is 17.6 MB (under the 20 MB cap), written in ~1 s and read back in ~0.4 s — and one row past the cap (25,001) is refused with a clear error, database untouched |
 
 ## Bugs found by the tests and fixed
 
@@ -46,6 +47,14 @@ NODE_PATH=$(npm root -g) node tests/stress_test.cjs
 3. **Quadratic render** — `levels()` was recomputed inside a per-role filter;
    an 800-role render took 22.4 s. After hoisting + indexing person lookups it
    takes 266 ms (~84× faster).
+4. **A "Person ID + Name" sheet wasn't recognized** — sheet detection required a
+   readiness/email/candidate-type column, so the most natural minimal HR layout
+   was skipped as "could not tell what this is". Detection now accepts any sheet
+   with a Person ID and Name column (unless it also references roles, which makes
+   it a slate sheet).
+5. **The 25,000-row sheet cap was only enforced on the Excel drag-drop path** —
+   raw CSV sheet drops and programmatic imports could slip past it. The cap now
+   lives in the one merge funnel every path goes through.
 
 ## Latent bugs from v26 fixed during the rebuild
 

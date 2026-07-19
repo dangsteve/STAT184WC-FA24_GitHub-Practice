@@ -530,7 +530,11 @@ function parseCsvRows(text) {
     await typeInto(page, 'ruleName', 'Test Block');
     await setSelect(page, 'ruleType', 'BLOCK');
     await setSelect(page, 'rulePerson', t.pid);
-    await setSelect(page, 'ruleTarget', t.roleId);
+    await page.evaluate(rid => {
+      const cb = [...document.querySelectorAll('.blockTargetCheck')].find(c => c.value === rid);
+      if (!cb) throw new Error('target role checkbox not found');
+      cb.click();
+    }, t.roleId);
     await page.click('#drawerSave');
     assert(await page.evaluate(() => __APP__.rules.some(r => r.id === 'RULE-BLOCK-T')), 'rule saved');
     await page.evaluate(sid => __APP__.approveSuccessor(sid), t.sid);
@@ -1965,9 +1969,245 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     21. SCREENSHOTS for the report
+     21. RULE SCOPING, MULTI-TARGET BLOCKS, CHANGE PREVIEW, THEMES, LIMITS
      =================================================================== */
-  section('13. Screenshots');
+  section('21. Rule scoping, multi-target blocks, change preview, themes & limits');
+  await test('eligibility rule scoped to chosen roles via UI: enforced there, ignored elsewhere', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.rules.forEach(r => r.enabled = false); });
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-SCOPED');
+    await typeInto(page, 'ruleName', 'CEO-only readiness bar');
+    // default requirement is readiness equals Ready Now — scope it to R-CEO only
+    assert(await page.evaluate(() => document.getElementById('fieldScopeBox').classList.contains('hidden')), 'scope picker hidden while "All roles" (the default)');
+    await setSelect(page, 'fieldScopeMode', 'some');
+    assert(await page.evaluate(() => !document.getElementById('fieldScopeBox').classList.contains('hidden')), 'role checkboxes appear');
+    // the filter box narrows the list; select-all only touches visible rows
+    await page.evaluate(() => {
+      const f = document.querySelector('#fieldScopeBox .rpFilter');
+      f.value = 'chief executive';
+      f.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const vis = await page.evaluate(() => [...document.querySelectorAll('#fieldScopeBox label[data-rp]')].filter(l => l.style.display !== 'none').length);
+    assert(vis >= 1 && vis < 5, 'filter narrows the role list (visible: ' + vis + ')');
+    await page.evaluate(() => {
+      const all = document.querySelector('#fieldScopeBox .rpAll');
+      all.click(); // checks only the visible (filtered) roles
+    });
+    const checked = await page.evaluate(() => [...document.querySelectorAll('.fieldScopeCheck')].filter(c => c.checked).map(c => c.value));
+    assert(checked.includes('R-CEO') && checked.length === vis, 'select-all-shown checked only the filtered roles');
+    await page.evaluate(() => { // keep exactly R-CEO
+      [...document.querySelectorAll('.fieldScopeCheck')].forEach(c => { if (c.checked && c.value !== 'R-CEO') c.click(); });
+    });
+    await page.click('#drawerSave');
+    const saved = await page.evaluate(() => __APP__.rules.find(x => x.id === 'RULE-SCOPED'));
+    assert(saved && saved.targetRoleId === 'R-CEO', 'scope saved — got ' + (saved && saved.targetRoleId));
+    const v = await page.evaluate(() => {
+      // person readiness wins over the slate row, so pick someone genuinely not Ready Now
+      const pid = __APP__.people.find(p => p.readiness && p.readiness !== 'Ready Now').id;
+      const mk = rid => ({ roleId: rid, personId: pid, readiness: '3-5 Years', source: 'Internal', confidence: 'High' });
+      const hit = rid => __APP__.evaluateRules(mk(rid)).blocks.some(m => m.includes('CEO-only readiness bar'));
+      return { scoped: hit('R-CEO'), other: hit('R-CFO') };
+    });
+    assertEq(v.scoped, true, 'not-ready candidate is blocked on the scoped role');
+    assertEq(v.other, false, 'the same shortfall on another role is ignored');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(x => x.recordType === 'RULE' && x.ruleId === 'RULE-SCOPED' && x.ruleTargetRoleId === 'R-CEO'), 'scope persisted to the CSV');
+    await page.evaluate(() => { __APP__.activeTab = 'RULES'; __APP__.render(); });
+    assert((await page.evaluate(() => document.body.textContent)).includes('only for'), 'rule list explains the scope in plain words');
+  });
+  await test('BLOCK rule with several target roles: blocked on each, free elsewhere; pipe list round-trips', async () => {
+    await loadBase(page);
+    const pid = await page.evaluate(() => __APP__.people[0].id);
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-MULTI');
+    await setSelect(page, 'ruleType', 'BLOCK');
+    await setSelect(page, 'rulePerson', pid);
+    await typeInto(page, 'ruleMsg', 'MULTI-TARGET-HIT');
+    await page.evaluate(() => {
+      ['R-CEO', 'R-CFO'].forEach(rid => [...document.querySelectorAll('.blockTargetCheck')].find(c => c.value === rid).click());
+    });
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.rules.find(r => r.id === 'RULE-MULTI').targetRoleId), 'R-CEO|R-CFO', 'both targets saved as a pipe list');
+    const v = await page.evaluate(pid => {
+      const mk = rid => ({ roleId: rid, personId: pid, readiness: 'Ready Now', source: 'Internal', confidence: 'High' });
+      const hit = rid => __APP__.evaluateRules(mk(rid)).blocks.some(m => m.includes('MULTI-TARGET-HIT'));
+      return { ceo: hit('R-CEO'), cfo: hit('R-CFO'), coo: hit('R-COO') };
+    }, pid);
+    assertEq(v.ceo, true, 'blocked on the first target');
+    assertEq(v.cfo, true, 'blocked on the second target');
+    assertEq(v.coo, false, 'free to move anywhere else');
+    await loadBase(page, await csvOf(page));
+    assertEq(await page.evaluate(() => __APP__.rules.find(r => r.id === 'RULE-MULTI').targetRoleId), 'R-CEO|R-CFO', 'pipe list survives the CSV round-trip');
+  });
+  await test('saving a BLOCK rule with no target role picked is refused', async () => {
+    await loadBase(page);
+    const pid = await page.evaluate(() => __APP__.people[0].id);
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-NOTARGET');
+    await setSelect(page, 'ruleType', 'BLOCK');
+    await setSelect(page, 'rulePerson', pid);
+    await page.click('#drawerSave');
+    assert(await page.evaluate(() => !__APP__.rules.some(r => r.id === 'RULE-NOTARGET')), 'not saved');
+    const msg = await lastMsg(page);
+    assert(msg.type === 'ERR' && msg.message.includes('target role'), 'error names the missing target roles');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('import review lists every change old → new; unchecking skips it (with cascade); inline edits win', async () => {
+    await loadBase(page);
+    const before = await page.evaluate(() => ({
+      title: __APP__.people.find(p => p.id === 'P001').title,
+      loc: __APP__.people.find(p => p.id === 'P002').location,
+      succ: __APP__.successors.length,
+    }));
+    const peopleSheet = 'Person ID,Name,Title,Location\n' +
+      'P001,,Preview Title,\n' +
+      'P002,,,Preview City\n' +
+      ',Skip Me Person,Analyst,';
+    const slateSheet = 'Role,Person,Ranking\nChief Executive Officer,Skip Me Person,1';
+    await page.evaluate(([a, b]) => __APP__.startSheetImport([{ name: 'people.csv', text: a }, { name: 'slate.csv', text: b }]), [peopleSheet, slateSheet]);
+    const chg = await page.evaluate(() => {
+      const cs = __APP__.importReview.changes;
+      return {
+        n: cs.length,
+        titleCid: cs.find(c => c.t === 'set' && c.id === 'P001' && c.field === 'title')?.cid,
+        titleFrom: cs.find(c => c.t === 'set' && c.id === 'P001' && c.field === 'title')?.from,
+        locCid: cs.find(c => c.t === 'set' && c.id === 'P002' && c.field === 'location')?.cid,
+        addCid: cs.find(c => c.t === 'add' && c.entity === 'person' && c.label === 'Skip Me Person')?.cid,
+        slateAdd: cs.some(c => c.t === 'add' && c.entity === 'slate' && c.label.includes('Skip Me Person')),
+        drawnRows: document.querySelectorAll('.impChange').length,
+        editBoxes: document.querySelectorAll('.impEdit').length,
+      };
+    });
+    assert(chg.titleCid && chg.locCid && chg.addCid, 'every change is recorded with an id');
+    assertEq(chg.titleFrom, before.title, 'old value shown for the title change');
+    assert(chg.slateAdd, 'the new slate row is listed too');
+    assertEq(chg.drawnRows, chg.n, 'a checkbox is drawn for every change');
+    assert(chg.editBoxes >= 2, 'set-changes get inline edit boxes');
+    await page.evaluate(t => { // skip the location change + the new person; rewrite the incoming title
+      document.querySelector(`.impChange[data-cid="${t.locCid}"]`).click();
+      document.querySelector(`.impChange[data-cid="${t.addCid}"]`).click();
+      document.querySelector(`.impEdit[data-cid="${t.titleCid}"]`).value = 'Reviewer Edited Title';
+    }, chg);
+    await page.click('#drawerSave'); // Apply Import
+    const after = await page.evaluate(() => ({
+      title: __APP__.people.find(p => p.id === 'P001').title,
+      loc: __APP__.people.find(p => p.id === 'P002').location,
+      ghost: __APP__.people.some(p => p.name === 'Skip Me Person'),
+      ghostSlate: __APP__.successors.some(s => String(s.personId).includes('SKIP-ME')),
+      succ: __APP__.successors.length,
+      msg: __APP__.messages[0].message,
+    }));
+    assertEq(after.title, 'Reviewer Edited Title', 'the inline edit is what got applied');
+    assertEq(after.loc, before.loc, 'unchecked change was skipped — old value kept');
+    assertEq(after.ghost, false, 'unchecked new person was not added');
+    assertEq(after.ghostSlate, false, 'their staged slate row was dropped with them (no dangling rows)');
+    assertEq(after.succ, before.succ, 'slate count unchanged');
+    assert(after.msg.includes('left out at your request'), 'apply notice counts the skipped changes');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'PERSON' && r.personId === 'P001' && r.personTitle === 'Reviewer Edited Title'), 'edited value persisted to the CSV');
+    assert(!(await csvOf(page)).includes('Skip Me Person'), 'skipped person is nowhere in the CSV');
+  });
+  await test('an edited incoming value must fit the field type or Apply refuses', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.fieldTypes['Bench Score'] = { type: 'number', on: 'person' }; });
+    const sheet = 'Person ID,Name,Bench Score\nP001,,4';
+    await page.evaluate(t => __APP__.startSheetImport([{ name: 'people.csv', text: t }]), sheet);
+    const cid = await page.evaluate(() => __APP__.importReview.changes.find(c => c.field === 'Bench Score')?.cid);
+    assert(cid, 'typed extra-field change listed');
+    await page.evaluate(c => { document.querySelector(`.impEdit[data-cid="${c}"]`).value = 'not a number'; }, cid);
+    await page.click('#drawerSave');
+    assert(await page.evaluate(() => !!__APP__.importReview), 'review stays open — nothing applied');
+    const msg = await lastMsg(page);
+    assert(msg.type === 'ERR' && msg.message.includes('Bench Score'), 'error names the field');
+    await page.evaluate(c => { document.querySelector(`.impEdit[data-cid="${c}"]`).value = '2-5'; }, cid);
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => (__APP__.people.find(p => p.id === 'P001')._x || {})['Bench Score']), '2-5', 'a valid range is accepted and applied');
+  });
+  await test('piece themes: 11 sets, no mice or pigs anywhere, holiday set renders live', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => ({
+      n: Object.keys(PIECE_SETS).length,
+      all: JSON.stringify(PIECE_SETS),
+      animalsPawn: PIECE_SETS.animals.ranks[4][0],
+      names: Object.values(PIECE_SETS).map(s => s.name),
+    }));
+    assert(t.n >= 10, '10+ piece sets to pick from — got ' + t.n);
+    ['🐭', '🐁', '🐀', '🐷', '🐖', '🐽'].forEach(g => assert(!t.all.includes(g), 'no insulting animals — found ' + g));
+    assertEq(t.animalsPawn, '🐾', 'animal pawns are paw prints now');
+    await page.evaluate(() => { __APP__.setAppearance('pieces', 'holiday'); __APP__.closeDrawer(); });
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    assertEq(await page.evaluate(() => document.querySelector('#chessOverlay .throne .king').textContent), '🎅', 'holiday king on the throne');
+    await page.evaluate(() => __APP__.closeChessView(true));
+    await page.evaluate(() => { __APP__.setAppearance('pieces', 'galaxy'); __APP__.closeDrawer(); });
+    await page.evaluate(() => __APP__.openChessView('R-CEO'));
+    assertEq(await page.evaluate(() => document.querySelector('#chessOverlay .throne .king').textContent), '🪐', 'galaxy king renders too');
+    await page.evaluate(() => __APP__.closeChessView(true));
+    await page.evaluate(() => { __APP__.setAppearance('pieces', 'classic'); __APP__.closeDrawer(); });
+    // every set appears as a button in the appearance panel
+    await clickAction(page, 'appearance');
+    const btns = await page.evaluate(() => document.querySelectorAll('[data-action="setPieces"]').length);
+    assertEq(btns, t.n, 'every piece set is offered in the panel');
+    await clickAction(page, 'closeDrawer');
+  });
+  await test('bare limit: a 25,000-row sheet (the documented cap) imports and applies in seconds', async () => {
+    await loadBase(page);
+    const bench = await page.evaluate(() => {
+      const N = 25000;
+      const lines = ['Person ID,Name,Title,Department,Location,Readiness'];
+      for (let i = 1; i <= N; i++) lines.push(`PBIG-${i},Bulk Person ${i},Analyst ${i % 7},Dept ${i % 12},City ${i % 40},1-2 Years`);
+      const text = lines.join('\n');
+      const t0 = performance.now();
+      __APP__.startSheetImport([{ name: 'bulk_people.csv', text }]);
+      const tReview = performance.now() - t0;
+      const staged = __APP__.importReview.stats.peopleAdded;
+      const nChanges = __APP__.importReview.changes.length;
+      const t1 = performance.now();
+      __APP__.applyImport();
+      const tApply = performance.now() - t1;
+      return { csvMB: (text.length / 1048576).toFixed(1), tReview: Math.round(tReview), tApply: Math.round(tApply), staged, nChanges, people: __APP__.people.length };
+    });
+    assertEq(bench.staged, 25000, 'all 25,000 rows staged');
+    assertEq(bench.nChanges, 25000, 'every row shows up in the change list');
+    assert(bench.people >= 25000, 'all applied — ' + bench.people + ' people in the database');
+    assert(bench.tReview + bench.tApply < 60000, `stayed under a minute (review ${bench.tReview} ms + apply ${bench.tApply} ms)`);
+    console.log(`        LIMIT NUMBERS — 25,000-row people sheet (${bench.csvMB} MB csv): review built in ${bench.tReview} ms, applied in ${bench.tApply} ms`);
+    const xl = await page.evaluate(async () => {
+      const t0 = performance.now();
+      const bytes = __APP__.buildWorkbookBytes();
+      const tWrite = performance.now() - t0;
+      const t1 = performance.now();
+      const sheets = await __APP__.readXlsx(bytes.buffer);
+      const tRead = performance.now() - t1;
+      return { mb: (bytes.length / 1048576).toFixed(1), tWrite: Math.round(tWrite), tRead: Math.round(tRead), rows: sheets.find(s => s.name === 'People').rows.length };
+    });
+    assert(xl.rows > 25000, 'the whole database fits in one workbook');
+    console.log(`        LIMIT NUMBERS — 25k-person .xlsx workbook: ${xl.mb} MB, written in ${xl.tWrite} ms, read back in ${xl.tRead} ms`);
+    assert(Number(xl.mb) < 20, 'a 25k-person workbook stays under the 20 MB xlsx cap');
+  });
+  await test('one row past the cap (25,001) is refused with a clear error; database untouched', async () => {
+    const res = await page.evaluate(() => {
+      const beforePeople = __APP__.people.length;
+      const lines = ['Person ID,Name'];
+      for (let i = 1; i <= 25001; i++) lines.push(`POVER-${i},Over Person ${i}`);
+      __APP__.startSheetImport([{ name: 'too_big.csv', text: lines.join('\n') }]);
+      const rep = __APP__.importReview.report;
+      return {
+        refused: rep.some(r => r.severity === 'ERROR' && r.problem.includes('limit') && r.action.includes('split')),
+        staged: __APP__.importReview.stats.peopleAdded,
+        beforePeople,
+      };
+    });
+    assert(res.refused, 'error report says the sheet is over the limit and how to fix it');
+    assertEq(res.staged, 0, 'nothing staged from the oversized sheet');
+    await page.click('[data-action="importCancel"]');
+    assertEq(await page.evaluate(() => __APP__.people.length), res.beforePeople, 'database untouched');
+  });
+
+  /* ===================================================================
+     22. SCREENSHOTS for the report
+     =================================================================== */
+  section('22. Screenshots');
   await test('capture UI screenshots', async () => {
     await page.setViewportSize({ width: 1560, height: 980 });
     await page.evaluate(() => localStorage.clear());

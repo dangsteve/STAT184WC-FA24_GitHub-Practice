@@ -90,8 +90,13 @@ Three kinds, editable in plain language:
   freely; anyone who doesn't is blocked (or flagged, depending on severity).
   Requirements support equal / not equal / contains / does not contain /
   any-of (checkbox list), and you can stack several (all must be met).
-- **Block a person's move** — a specific person cannot move to a specific role,
-  or cannot change role at all.
+  **Applies To Roles** decides where the rule counts: it defaults to *All
+  roles*, or switch to *Only selected roles…* and tick exactly the roles it
+  should guard (a filter box and "select all shown" make big lists quick).
+  The rule list spells the scope out in plain words.
+- **Block a person's move** — a specific person cannot move into the **target
+  roles you tick** (one or many — same checkbox picker), or cannot change role
+  at all.
 - **Auto backfill** — when a role becomes vacant, pull in the top-ranked slate
   candidate of a chosen type, or use an explicit role → person chart.
 
@@ -119,9 +124,17 @@ CSV and become available everywhere, including rule builders and filters.
   drag them all onto the app together (or ⋯ → *Import sheets (merge)*). You get
   an **Import Review** first — how many rows are new vs. updated, every problem
   listed with what was done about it, and a **downloadable error report** for
-  rows that were skipped (e.g. a candidate whose name isn't in People). Nothing
-  touches the database until you press **Apply Import**, and it merges into your
-  current file — rules, tabs and everything else stay put.
+  rows that were skipped (e.g. a candidate whose name isn't in People). The
+  review also shows a **Changes list**: every single change the import wants to
+  make, as *old value → new value*. **Uncheck** any row to skip just that change
+  (skipping a new person also drops their staged slate rows, so nothing is left
+  dangling), or **type over the incoming value** right in the list — your edit
+  is what gets applied, and typed fields still validate. Incoming values win and
+  nothing is ever deleted. Nothing touches the database until you press
+  **Apply Import**, and it merges into your current file — rules, tabs and
+  everything else stay put. Sheets can be up to **25,000 rows** each (files up
+  to 50 MB for CSV, 20 MB for Excel) — a 25,000-row sheet imports in under a
+  second.
 - **Real Excel files work too.** ⋯ → *Export Excel workbook (.xlsx)* writes a
   workbook with People / Roles / Candidates / Boards tabs (plus a view-only
   Rules tab) — nice for reading and for HR to edit. Bring it back with
@@ -157,10 +170,12 @@ CSV and become available everywhere, including rule builders and filters.
 ## Appearance (the 🎨 button)
 
 A little fun, zero risk: pick a **color theme** (Classic Blue, Forest, Royal
-Plum, Sunset, Ocean), a **chess piece set** (Classic, Royal Court, Animal
-Kingdom, Woodland), and a **board style** (Classic, Wood, Card Table, Marble).
-Choices apply instantly, are saved on your computer only, and never change the
-data or anyone else's view.
+Plum, Sunset, Ocean), one of **eleven chess piece sets** (Classic, Royal Court,
+Animal Kingdom, Woodland, Holiday 🎅, Galaxy 🪐, Robot Lab 🤖, Fantasy Quest 🧙,
+Dinosaurs 🦖, Deep Sea 🔱, Champions 🏆), and a **board style** (Classic, Wood,
+Card Table, Marble). Choices apply instantly, are saved on your computer only,
+and never change the data or anyone else's view. The 🎨 button is also in the
+chess-board header, so you can preview sets live on the board.
 
 ## Safety
 
