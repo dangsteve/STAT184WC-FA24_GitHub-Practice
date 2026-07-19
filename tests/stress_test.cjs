@@ -261,7 +261,7 @@ function parseCsvRows(text) {
   await test('delete person clears slates and incumbency (confirm dialog)', async () => {
     dialogs = [];
     await page.evaluate(() => __APP__.openPersonDrawer('P052-NEW'));
-    await page.click('[data-action="deletePerson"]');
+    await page.click('#drawer [data-action="deletePerson"]'); // the drawer's Delete button, not a table ✕
     assert(dialogs.length === 1 && dialogs[0].type === 'confirm', 'confirm asked');
     const after = await page.evaluate(() => ({
       person: !!__APP__.people.find(p => p.id === 'P052-NEW'),
@@ -2205,9 +2205,166 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     22. SCREENSHOTS for the report
+     22. SHARE THE PROGRAM (WITH FEATURE LOCKS), CANDIDATE ✕, WHERE-COLUMNS
      =================================================================== */
-  section('22. Screenshots');
+  section('22. Program sharing with locks, candidate ✕ delete, roles/tabs columns');
+  const TMP_LOCKED = path.join(ROOT, 'tests', 'tmp_shared_locked.html');
+  const TMP_FULL = path.join(ROOT, 'tests', 'tmp_shared_full.html');
+  await test('share drawer: opt-in program copy with per-feature checkboxes (all on by default)', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openShareDrawer());
+    assert(await page.evaluate(() => !!document.getElementById('shareProgram')), 'opt-in checkbox exists');
+    assert(await page.evaluate(() => document.getElementById('shareProgOpts').classList.contains('hidden')), 'feature list hidden until they opt in');
+    await page.click('#shareProgram');
+    assert(await page.evaluate(() => !document.getElementById('shareProgOpts').classList.contains('hidden')), 'opting in reveals the feature checkboxes');
+    const feats = await page.evaluate(() => [...document.querySelectorAll('.shareFeature')].map(c => ({ v: c.value, on: c.checked })));
+    assertEq(feats.length, 6, 'six lockable features offered');
+    assert(feats.every(f => f.on), 'every feature starts checked — full copy by default');
+    assert(['rules', 'addRoles', 'addPeople', 'del', 'moves', 'tools'].every(k => feats.some(f => f.v === k)), 'rules/adding/deleting/moves/tools all coverable');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('a restricted copy enforces the locks but your rules still run inside it', async () => {
+    const html = await page.evaluate(() => __APP__.buildProgramCopy({ rules: true, addPeople: true, addRoles: true, del: true, moves: true, tools: true }));
+    assert(html && html.includes('"rules":true'), 'locks baked into the copy');
+    fs.writeFileSync(TMP_LOCKED, html);
+    const p2 = await newPage(browser);
+    await p2.goto('file://' + TMP_LOCKED);
+    await p2.waitForFunction(() => window.__APP__);
+    await loadBase(p2);
+    const r = await p2.evaluate(() => {
+      const out = { locks: __APP__.programLocks };
+      out.rulesTabGone = !document.getElementById('tabs').textContent.includes('Rules');
+      __APP__.activeTab = 'PEOPLE'; __APP__.render();
+      out.noAddBtn = !document.querySelector('[data-action="openPersonDrawerNew"]');
+      out.noDeleteX = !document.querySelector('[data-action="deletePerson"]');
+      const nPeople = __APP__.people.length;
+      __APP__.deletePerson(__APP__.people[0].id);
+      out.deleteBlocked = __APP__.people.length === nPeople && __APP__.messages[0].message.includes('turned off');
+      const ok = __APP__.successors.find(s => s.readiness === 'Ready Now');
+      const inc = __APP__.roles.find(x => x.id === ok.roleId).incumbentPersonId;
+      __APP__.approveSuccessor(ok.id);
+      out.approveBlocked = __APP__.roles.find(x => x.id === ok.roleId).incumbentPersonId === inc && __APP__.messages[0].message.includes('turned off');
+      __APP__.startSheetImport([{ name: 'p.csv', text: 'Person ID,Name\n,Sneaky Import' }]);
+      out.importBlocked = !__APP__.importReview && __APP__.messages[0].message.includes('turned off');
+      const bad = __APP__.successors.find(s => s.readiness !== 'Ready Now');
+      out.rulesStillEnforce = __APP__.evaluateRules(bad).blocks.length > 0;
+      __APP__.openShareDrawer();
+      out.dataShareStillWorks = !!document.getElementById('shareScope');
+      out.noProgramReshare = !document.getElementById('shareProgram') && document.getElementById('drawerBody').textContent.includes('restricted shared copy');
+      out.cannotMintCopies = __APP__.buildProgramCopy({}) === null;
+      return out;
+    });
+    assert(r.locks.rules && r.locks.moves, 'copy booted with its locks');
+    assert(r.rulesTabGone, 'Rules tab is gone');
+    assert(r.noAddBtn, '+ Add Candidate is gone');
+    assert(r.noDeleteX, 'the ✕ column is gone when deleting is locked');
+    assert(r.deleteBlocked, 'deleting is refused with a plain-words notice');
+    assert(r.approveBlocked, 'approvals are refused — nobody moves');
+    assert(r.importBlocked, 'import & merge is refused');
+    assert(r.rulesStillEnforce, 'eligibility rules still enforce inside the copy');
+    assert(r.dataShareStillWorks, 'they can still share data files onward');
+    assert(r.noProgramReshare, 'but a restricted copy cannot offer the program');
+    assert(r.cannotMintCopies, 'and cannot mint unrestricted copies programmatically');
+    await p2.close();
+  });
+  await test('a full program copy (nothing unchecked) is the complete planner and can re-share', async () => {
+    const html = await page.evaluate(() => __APP__.buildProgramCopy({}));
+    assert(html && html.length > 100000, 'full copy generated');
+    fs.writeFileSync(TMP_FULL, html);
+    const p3 = await newPage(browser);
+    await p3.goto('file://' + TMP_FULL);
+    await p3.waitForFunction(() => window.__APP__);
+    await loadBase(p3);
+    const f = await p3.evaluate(() => ({
+      roles: __APP__.roles.length,
+      rulesTab: document.getElementById('tabs').textContent.includes('Rules'),
+      noLocks: !Object.keys(__APP__.programLocks).some(k => __APP__.programLocks[k]),
+      reshare: typeof __APP__.buildProgramCopy({ rules: true }) === 'string',
+      csv: __APP__.toCSV().length > 0,
+    }));
+    assertEq(f.roles, 72, 'full database loads in the copy');
+    assert(f.rulesTab && f.noLocks, 'nothing is locked');
+    assert(f.reshare, 'a full copy can itself hand out (restricted) copies');
+    assert(f.csv, 'CSV engine intact');
+    await p3.close();
+    fs.unlinkSync(TMP_LOCKED); fs.unlinkSync(TMP_FULL);
+  });
+  await test('candidates tab: ✕ deletes the person from everywhere, with confirm, undo and CSV', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const ruleBlob = JSON.stringify(__APP__.rules); // avoid someone a rule names, so the ID fully leaves the CSV
+      const p = __APP__.people.find(x => __APP__.successors.some(s => s.personId === x.id) && !ruleBlob.includes(x.id));
+      return { pid: p.id, slates: __APP__.successors.filter(s => s.personId === p.id).length, nPeople: __APP__.people.length, nSucc: __APP__.successors.length };
+    });
+    await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
+    dialogs = [];
+    await page.click(`[data-action="deletePerson"][data-person-id="${t.pid}"]`);
+    assert(dialogs.some(d => d.type === 'confirm' && d.message.includes('Delete this person')), 'asked first');
+    const after = await page.evaluate(pid => ({
+      gone: !__APP__.people.some(p => p.id === pid),
+      succGone: !__APP__.successors.some(s => s.personId === pid),
+      nPeople: __APP__.people.length, nSucc: __APP__.successors.length,
+    }), t.pid);
+    assert(after.gone, 'person removed');
+    assert(after.succGone, 'their slate rows removed');
+    assertEq(after.nPeople, t.nPeople - 1, 'exactly one person fewer');
+    assertEq(after.nSucc, t.nSucc - t.slates, 'exactly their slate rows fewer');
+    assert(!(await csvOf(page)).includes(t.pid + ','), 'gone from the CSV');
+    await page.evaluate(() => __APP__.undoLastAction());
+    const undone = await page.evaluate(t => ({
+      back: __APP__.people.some(p => p.id === t.pid),
+      succ: __APP__.successors.filter(s => s.personId === t.pid).length,
+    }), t);
+    assert(undone.back, 'undo brings the person back');
+    assertEq(undone.succ, t.slates, 'and every slate row');
+  });
+  await test('"Show roles & tabs" flag: off by default, adds two accurate columns, remembered per browser, never touches the data', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
+    const before = await page.evaluate(() => ({
+      flag: document.getElementById('peopleWhereFlag').checked,
+      ths: document.querySelectorAll('#mainView thead th').length,
+      txt: document.querySelector('#mainView thead').textContent,
+    }));
+    assertEq(before.flag, false, 'off by default');
+    assert(!before.txt.includes('Tabs'), 'no extra columns by default');
+    const csvBefore = await csvOf(page);
+    await page.click('#peopleWhereFlag');
+    const on = await page.evaluate(() => ({
+      ths: document.querySelectorAll('#mainView thead th').length,
+      txt: document.querySelector('#mainView thead').textContent,
+    }));
+    assertEq(on.ths, before.ths + 2, 'exactly two columns added');
+    assert(on.txt.includes('Roles They’re In') && on.txt.includes('Tabs'), 'the two new columns are Roles and Tabs');
+    const check = await page.evaluate(() => {
+      // pick someone who holds a seat AND sits on a slate, and verify the cells
+      const p = __APP__.people.find(x => __APP__.roles.some(r => r.incumbentPersonId === x.id) && __APP__.successors.some(s => s.personId === x.id));
+      if (!p) return { skip: true };
+      const row = document.querySelector(`#mainView tr[data-person-id="${p.id}"]`);
+      const cells = [...row.querySelectorAll('td')].map(td => td.getAttribute('title') || td.textContent);
+      const seat = __APP__.roles.find(r => r.incumbentPersonId === p.id);
+      const slateRole = __APP__.roles.find(r => r.id === __APP__.successors.find(s => s.personId === p.id).roleId);
+      const tabName = (__APP__.boards.find(b => b.id === (seat.boardId || slateRole.boardId)) || {}).name;
+      return {
+        rolesCell: cells.some(c => c.includes(seat.title + ' (seat)') && (!slateRole || c.includes(slateRole.title))),
+        tabCell: !tabName || cells.some(c => c.includes(tabName)),
+      };
+    });
+    if (!check.skip) { assert(check.rolesCell, 'seat role marked "(seat)" and slate roles listed'); assert(check.tabCell, 'their board tabs listed'); }
+    assertEq(await csvOf(page), csvBefore, 'toggling the view flag never changes the CSV');
+    assertEq((await counts(page)).dirty, false, 'and never marks the data unsaved');
+    await page.reload();
+    await page.waitForFunction(() => window.__APP__ && __APP__.people.length > 0);
+    await page.evaluate(() => { __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
+    assert(await page.evaluate(() => document.getElementById('peopleWhereFlag').checked), 'flag survives a reload (per-browser)');
+    await page.click('#peopleWhereFlag'); // back off for the rest of the suite
+    assert(!(await page.evaluate(() => document.getElementById('peopleWhereFlag').checked)), 'flag off again');
+  });
+
+  /* ===================================================================
+     23. SCREENSHOTS for the report
+     =================================================================== */
+  section('23. Screenshots');
   await test('capture UI screenshots', async () => {
     await page.setViewportSize({ width: 1560, height: 980 });
     await page.evaluate(() => localStorage.clear());

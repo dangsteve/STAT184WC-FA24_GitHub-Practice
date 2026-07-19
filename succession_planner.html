@@ -498,6 +498,27 @@ const LIST_CAP=400;   // max table rows rendered at once
 const PIECE_CAP=200;  // max candidate cards rendered at once
 const MAX_XLSX_MB=20, MAX_CSV_MB=50, MAX_SHEET_ROWS=25000, MAX_WIDGETS=8;
 
+/* ---------- feature locks for shared copies of the program ----------
+   Empty = the full program. When a restricted copy is generated through
+   Share / Export, the next line is rewritten with the locked features —
+   keep the marker comment exactly as is. */
+const PROGRAM_LOCKS={}; /*PROGRAM_LOCKS*/
+const LOCK_INFO={
+  rules:'Rules (viewing & editing)',
+  addRoles:'Adding roles',
+  addPeople:'Adding candidates',
+  del:'Deleting people & roles',
+  moves:'Approvals & seat moves',
+  tools:'Import, merge & Data Tools',
+};
+function locked(k){return !!PROGRAM_LOCKS[k]}
+function anyLocks(){return Object.keys(LOCK_INFO).some(k=>PROGRAM_LOCKS[k])}
+function lockNotice(k){notice('WARN',(LOCK_INFO[k]||'This feature')+' is turned off in this shared copy of the planner.')}
+
+/* personal view flag: extra Roles/Tabs columns on the Candidates tab */
+const PEOPLE_WHERE_KEY='succession_planner_people_where_v1';
+let peopleShowWhere=false;try{peopleShowWhere=localStorage.getItem(PEOPLE_WHERE_KEY)==='1'}catch(e){}
+
 let boards=systemBoards(),roles=[],people=[],successors=[],rules=[],history=[],messages=[];
 let fileHandle=null,selectedPersonId='',backRoleId='',undoStack=[],importBaseline=null,currentDrawerPersonId='',customFieldValues={};
 let activeTab='MASTER',dirty=false,backupTimer=null,automationDepth=0;
@@ -1061,6 +1082,7 @@ function approveTop(rid){
   approveSuccessor(top.id);
 }
 function approveSuccessor(sid){
+  if(locked('moves')){lockNotice('moves');return}
   const s=successors.find(x=>x.id===sid);if(!s)return;
   const p=person(s.personId),r=role(s.roleId);
   if(!p||!r){notice('ERR','Cannot approve: person or role record is missing.');return}
@@ -1084,6 +1106,7 @@ function approveSuccessor(sid){
   render();
 }
 function autoMove(sid){
+  if(locked('moves')){lockNotice('moves');return}
   const s=successors.find(x=>x.id===sid);
   const r=s?role(s.roleId):null,p=s?person(s.personId):null;
   if(!s||!r||!p)return;
@@ -1145,6 +1168,7 @@ function runAutoMoveQueueForRole(roleId){
    Rendering
    ===================================================================== */
 function render(){
+  if(activeTab==='RULES'&&locked('rules'))activeTab='ALL';
   fillFilters();
   renderTabs();
   renderStats();
@@ -1174,7 +1198,7 @@ function fillFilters(){
 }
 function renderTabs(){
   const customs=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id));
-  const order=[boards.find(b=>b.id==='MASTER'),boards.find(b=>b.id==='ALL'),...customs,boards.find(b=>b.id==='PEOPLE'),boards.find(b=>b.id==='INSIGHTS'),boards.find(b=>b.id==='RULES'),boards.find(b=>b.id==='HISTORY')].filter(Boolean);
+  const order=[boards.find(b=>b.id==='MASTER'),boards.find(b=>b.id==='ALL'),...customs,boards.find(b=>b.id==='PEOPLE'),boards.find(b=>b.id==='INSIGHTS'),boards.find(b=>b.id==='RULES'),boards.find(b=>b.id==='HISTORY')].filter(Boolean).filter(b=>!(b.id==='RULES'&&locked('rules')));
   const count=b=>b.id==='PEOPLE'?`<span class="count">${people.length}</span>`:b.id==='RULES'?`<span class="count">${rules.length}</span>`:'';
   el('tabs').innerHTML=order.map(b=>`<button class="tab ${activeTab===b.id?'active':''}" data-action="tab" data-tab-id="${attr(b.id)}">${esc(b.name)}${count(b)}</button>`).join('')+
     `<button class="tab tab-add" data-action="manageTabs" title="Add or manage board tabs">+</button>`;
@@ -1391,23 +1415,36 @@ function applyInferredLines(){
 
 /* ---------- people ---------- */
 function renderPeople(){
-  setView('Candidates','Every person is stored once by Person ID — edits update all slates that reference them.',`<button class="btn btn-green btn-sm" data-action="openPersonDrawerNew">+ Add Candidate</button>`);
+  const whereToggle=`<label class="hint" style="display:inline-flex;align-items:center;gap:6px;margin-right:10px;cursor:pointer;user-select:none"><input type="checkbox" id="peopleWhereFlag" ${peopleShowWhere?'checked':''}> Show roles &amp; tabs</label>`;
+  setView('Candidates','Every person is stored once by Person ID — edits update all slates that reference them.',whereToggle+(locked('addPeople')?'':`<button class="btn btn-green btn-sm" data-action="openPersonDrawerNew">+ Add Candidate</button>`));
   const q=norm(v('search')),d=v('deptFilter');
   const list=people.filter(p=>[p.id,p.name,p.title,p.department,p.location,p.readiness,p.candidateType,p.skills].join(' ').toLowerCase().includes(q)&&(d==='All Departments'||p.department===d));
+  const boardName=id=>boards.find(b=>b.id===id)?.name;
+  const capList=a=>a.length?esc(a.slice(0,3).join(', '))+(a.length>3?` <span class="hint">+${a.length-3} more</span>`:''):'—';
   const rows=list.slice(0,LIST_CAP).map(p=>{
     const slates=successors.filter(s=>s.personId===p.id).length;
     const cur=currentRoleForPerson(p.id);
+    let whereCells='';
+    if(peopleShowWhere){
+      const seatRoles=roles.filter(r=>r.incumbentPersonId===p.id);
+      const slateRoles=successors.filter(s=>s.personId===p.id).map(s=>role(s.roleId)).filter(Boolean);
+      const roleNames=[...new Set([...seatRoles.map(r=>(r.title||r.id)+' (seat)'),...slateRoles.map(r=>r.title||r.id)])];
+      const tabNames=[...new Set([...seatRoles,...slateRoles].map(r=>boardName(r.boardId)).filter(Boolean))];
+      whereCells=`<td title="${attr(roleNames.join(', '))}">${capList(roleNames)}</td><td title="${attr(tabNames.join(', '))}">${capList(tabNames)}</td>`;
+    }
     return `<tr class="row-click" data-action="openPerson" data-person-id="${attr(p.id)}">
       <td style="display:flex;align-items:center;gap:8px">${avatarHtml(p.name,26)}<div><b>${esc(p.name)}</b><div style="color:var(--muted);font-size:11px">${esc(p.id)}</div></div></td>
       <td>${esc(p.title||'')}${cur?`<div style="color:var(--muted);font-size:11px">in ${esc(cur.title)}</div>`:''}</td>
       <td>${esc(p.department||'')}</td><td>${esc(p.location||'')}</td>
       <td>${readinessBadge(p.readiness)}</td><td>${esc(p.candidateType||'')}</td>
-      <td style="text-align:center">${slates||'—'}</td>
+      <td style="text-align:center">${slates||'—'}</td>${whereCells}
+      ${locked('del')?'':`<td style="text-align:center"><button class="icon-btn bad" data-action="deletePerson" data-person-id="${attr(p.id)}" title="Delete ${attr(p.name)} — removes them from every slate (undoable)">&#10005;</button></td>`}
     </tr>`;
   }).join('');
+  const whereHead=peopleShowWhere?'<th>Roles They&rsquo;re In</th><th>Tabs</th>':'';
   el('mainView').innerHTML=list.length
-    ?`<div class="tablebox"><table class="table"><thead><tr><th>Name</th><th>Title</th><th>Department</th><th>Location</th><th>Readiness</th><th>Type</th><th>Slates</th></tr></thead><tbody>${rows}</tbody></table>${list.length>LIST_CAP?`<div class="tfoot-note">Showing ${LIST_CAP} of ${list.length} — refine the search to see more.</div>`:''}</div>`
-    :emptyState('No candidates found','Add a candidate or adjust the search.',`<button class="btn btn-green" data-action="openPersonDrawerNew">+ Add Candidate</button>`);
+    ?`<div class="tablebox"><table class="table"><thead><tr><th>Name</th><th>Title</th><th>Department</th><th>Location</th><th>Readiness</th><th>Type</th><th>Slates</th>${whereHead}${locked('del')?'':'<th></th>'}</tr></thead><tbody>${rows}</tbody></table>${list.length>LIST_CAP?`<div class="tfoot-note">Showing ${LIST_CAP} of ${list.length} — refine the search to see more.</div>`:''}</div>`
+    :emptyState('No candidates found','Add a candidate or adjust the search.',locked('addPeople')?'':`<button class="btn btn-green" data-action="openPersonDrawerNew">+ Add Candidate</button>`);
 }
 
 /* ---------- rules ---------- */
@@ -1711,6 +1748,7 @@ function savePerson(oldId=''){
   closeDrawer();render();
 }
 function deletePerson(id){
+  if(locked('del')){lockNotice('del');return}
   if(!confirm('Delete this person and remove them from all slates?'))return;
   pushUndo('Delete candidate');
   const name=personName(id,id);
@@ -1792,6 +1830,7 @@ function saveRole(oldId=''){
   closeDrawer();render();
 }
 function deleteRole(id){
+  if(locked('del')){lockNotice('del');return}
   if(!confirm('Delete this role and all of its slate entries?'))return;
   pushUndo('Delete role');
   const title=role(id)?.title||id;
@@ -1974,6 +2013,7 @@ function openRuleDrawer(id=''){
   updateRuleTypeUI();
 }
 function saveRule(oldId=''){
+  if(locked('rules')){lockNotice('rules');return}
   const type=v('ruleType');
   const r={id:v('ruleId').trim()||uid('RULE'),name:v('ruleName'),type,scope:'Candidate',field:'',operator:'',value:'',personId:v('rulePerson'),targetRoleId:'',altPersonId:'',severity:v('ruleSeverity')||'Block',message:v('ruleMsg'),enabled:v('ruleEnabled')==='true'};
   if(r.id!==oldId&&rules.some(x=>x.id===r.id)){notice('ERR',`Rule ID "${r.id}" already exists.`);return}
@@ -2016,6 +2056,7 @@ function saveRule(oldId=''){
   activeTab='RULES';closeDrawer();render();
 }
 function deleteRule(id){
+  if(locked('rules')){lockNotice('rules');return}
   if(!confirm('Delete this rule?'))return;
   pushUndo('Delete rule');
   const name=rules.find(r=>r.id===id)?.name||id;
@@ -2025,6 +2066,7 @@ function deleteRule(id){
   closeDrawer();render();
 }
 function toggleRule(id,on){
+  if(locked('rules')){lockNotice('rules');render();return}
   const r=rules.find(x=>x.id===id);if(!r)return;
   pushUndo(on?'Enable rule':'Disable rule');
   r.enabled=!!on;
@@ -2127,6 +2169,7 @@ function chessSwap(aSid,bSid){
   renderChessView();
 }
 function chessTakeSeat(sid){
+  if(locked('moves')){lockNotice('moves');return}
   if(!chess||!chess.order.includes(sid))return;
   chess.stagedIncumbent=sid;
   renderChessView();
@@ -2384,12 +2427,22 @@ const ACTIONS={
   downloadTemplate:()=>{el('moreMenu').classList.remove('open');downloadTemplate()},
   addExtraField:()=>addExtraFieldPrompt(),
 };
+const LOCK_ACTIONS={
+  openRuleDrawerNew:'rules',deleteRule:'rules',
+  openRoleDrawerNew:'addRoles',
+  openPersonDrawerNew:'addPeople',
+  deletePerson:'del',deleteRole:'del',
+  approveSucc:'moves',approveTop:'moves',autoMove:'moves',chessTakeSeat:'moves',
+  dataTools:'tools',importSheets:'tools',downloadSheetTemplates:'tools',
+};
 document.addEventListener('click',e=>{
   const elm=e.target.closest('[data-action]');
   const menu=el('moreMenu');
   if(menu.classList.contains('open')&&!e.target.closest('.menu-wrap'))menu.classList.remove('open');
   if(chess&&chess.menuOpen&&!e.target.closest('.chess-fields-wrap')){chess.menuOpen=false;renderChessView()}
   if(!elm)return;
+  const lk=LOCK_ACTIONS[elm.dataset.action];
+  if(lk&&locked(lk)){e.preventDefault();lockNotice(lk);return}
   const fn=ACTIONS[elm.dataset.action];
   if(fn){e.preventDefault();fn(elm.dataset,elm,e)}
 });
@@ -2406,6 +2459,8 @@ document.addEventListener('change',e=>{
   if(t.classList.contains('selAll'))return toggleAllCondValues(t);
   if(t.classList.contains('rpAll')){const picker=t.closest('.value-picker');picker.querySelectorAll('.'+t.dataset.cls).forEach(cb=>{if(cb.closest('label').style.display!=='none')cb.checked=t.checked});return}
   if(t.id==='fieldScopeMode')return el('fieldScopeBox')?.classList.toggle('hidden',t.value!=='some');
+  if(t.id==='shareProgram')return el('shareProgOpts')?.classList.toggle('hidden',!t.checked);
+  if(t.id==='peopleWhereFlag'){peopleShowWhere=t.checked;try{localStorage.setItem(PEOPLE_WHERE_KEY,peopleShowWhere?'1':'0')}catch(err){}return renderPeople()}
   if(t.id==='chessRoleSwitch')return chessGoTo(t.value);
   if(t.id==='ruleType')return updateRuleTypeUI();
   if(t.id==='ruleBlockOperator')return updateBlockTargetUI();
@@ -2543,9 +2598,8 @@ window.__APP__={
   computeTreeParents,applyInferredLines,downloadTemplate,extraColumnNames,extraKeysFor,prettyBoardName,
 };
 
-/* ---------- boot ---------- */
-render();
-checkBackup().then(()=>{if(!roles.length&&!people.length)setStatus('Ready — open your CSV database or add records.')});
+/* boot happens in the final script block, so the pristine page can be
+   snapshotted first for "give them the program too" sharing */
 </script>
 <script>
 'use strict';
@@ -2771,6 +2825,7 @@ function buildSheetImport(fileTexts,dbExtras,base){
   return{staged,report,stats,changes,files:fileTexts.map(f=>f.name)};
 }
 function startSheetImport(fileTexts,dbExtras){
+  if(locked('tools')){lockNotice('tools');return}
   if((!fileTexts||!fileTexts.length)&&!dbExtras)return;
   openImportReview(buildSheetImport(fileTexts||[],dbExtras));
 }
@@ -3161,21 +3216,41 @@ function buildScopedData(tabId){
 }
 function openShareDrawer(){
   const customs=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id));
+  const progSection=anyLocks()
+    ?'<div class="form-note" style="margin-top:14px">This is a restricted shared copy of the planner — it can share data files, but not the program itself.</div>'
+    :`<div class="rule-section" style="margin-top:14px"><h3>Give them the program too?</h3>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="shareProgram"> <span>Also download a copy of the planner itself (an HTML file) — they just open it in Chrome or Edge, nothing to install</span></label>
+      <div id="shareProgOpts" class="hidden" style="margin-top:10px">
+        <div class="hint" style="margin-bottom:6px">By default their copy is the <b>full program</b>. Uncheck anything they should not be able to do — it is switched off inside their copy:</div>
+        ${Object.entries(LOCK_INFO).map(([k,label])=>`<label style="display:block;margin:4px 0;cursor:pointer"><input type="checkbox" class="shareFeature" value="${attr(k)}" checked> ${esc(label)}</label>`).join('')}
+        <div class="hint" style="margin-top:6px">Your eligibility and block rules still run in their copy either way — unchecking Rules hides the tab and stops edits, it never turns enforcement off.</div>
+      </div>
+    </div>`;
   openDrawer('Share / Export a Board','Export one board (its roles, the people on those slates, and their slate rows) to hand to someone else. When they send it back, use Import & merge — new and changed records are calculated against your database.',
     `<div class="grid">
       <div><label>What to export</label><select id="shareScope"><option value="ALL">Everything (all boards)</option>${customs.map(b=>`<option value="${attr(b.id)}">${esc(b.name)} board only</option>`).join('')}</select></div>
       <div><label>Format</label><select id="shareFormat"><option value="csv">Planner CSV (opens in this app)</option><option value="xlsx">Excel workbook (tabs, easy to read)</option></select></div>
-    </div>
-    <div class="form-note" style="margin-top:14px"><b>How the round trip works:</b> the other person opens the CSV in their own copy of the planner (they will only see this board) or edits the Excel tabs directly. When they return the file, use ⋯ &rarr; Import &amp; merge — you get a review of everything new or changed, with an error report for anything broken, before it touches your database. Deletions don&rsquo;t sync — remove records here in the master.</div>`,
+    </div>`+progSection+
+    `<div class="form-note" style="margin-top:14px"><b>How the round trip works:</b> the other person opens the CSV in their own copy of the planner (they will only see this board) or edits the Excel tabs directly. When they return the file, use ⋯ &rarr; Import &amp; merge — you get a review of everything new or changed, with an error report for anything broken, before it touches your database. Deletions don&rsquo;t sync — remove records here in the master.</div>`,
     ()=>{
       const scope=v('shareScope'),fmt=v('shareFormat');
       const data=buildScopedData(scope);
       if(!data){notice('ERR','Board not found.');return}
       const label=scope==='ALL'?'all_boards':scope.toLowerCase().replace(/[^a-z0-9]+/g,'_');
+      const wantProgram=!anyLocks()&&el('shareProgram')&&el('shareProgram').checked;
+      let progHtml=null,lockedCount=0;
+      if(wantProgram){
+        const locks={};
+        document.querySelectorAll('.shareFeature').forEach(c=>{if(!c.checked)locks[c.value]=true});
+        lockedCount=Object.keys(locks).length;
+        progHtml=buildProgramCopy(locks);
+        if(!progHtml){notice('ERR','Could not build the program copy — export the data file alone, or send them your own HTML file.');return}
+      }
       if(fmt==='xlsx')downloadBytes(`succession_share_${label}.xlsx`,makeXlsx(workbookSheets(data)),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       else download(`succession_share_${label}.csv`,toCSV(data),'text/csv');
-      log('Board Shared',`Exported ${scope==='ALL'?'all boards':boards.find(x=>x.id===scope)?.name||scope} as ${fmt.toUpperCase()}`);
-      notice('OK','Share file exported.');
+      if(progHtml)setTimeout(()=>download('succession_planner_shared.html',progHtml,'text/html'),500);
+      log('Board Shared',`Exported ${scope==='ALL'?'all boards':boards.find(x=>x.id===scope)?.name||scope} as ${fmt.toUpperCase()}`+(progHtml?` + program copy (${lockedCount?lockedCount+' feature(s) off':'full'})`:''));
+      notice('OK',progHtml?'Share file exported — the program copy downloads right behind it.':'Share file exported.');
       closeDrawer();
     });
   el('drawerSave').textContent='Export';
@@ -3527,6 +3602,33 @@ Object.assign(window.__APP__,{makeXlsx,readXlsx,makeZip,unzip,workbookSheets,row
   importXlsxBuffer:async(buf,name)=>{const sheets=await readXlsx(buf);const texts=[];const notes=[];sheets.forEach(sh=>{if(!sh.rows.length)return;const type=detectSheetType(sh.rows[0].map(normalizeHeader));if(type&&type!=='FULL')texts.push({name:(name||'workbook.xlsx')+' ▸ '+sh.name,text:rowsToCsvText(sh.rows)});else notes.push({file:sh.name,severity:'INFO',problem:'Sheet skipped',action:''})});startSheetImport(texts,{notes})},
   importFullDbText:(name,text)=>{const inputs=fullDbToImportInputs(name,text);if(inputs)startSheetImport(inputs.texts,inputs.extras)},
 });
+</script>
+<script>
+'use strict';
+/* =====================================================================
+   Snapshot & boot — this block MUST stay last. It captures the page's
+   own source (before anything renders) so Share / Export can hand out a
+   working copy of the program, then boots the app.
+   ===================================================================== */
+const _bootTheme=document.documentElement.getAttribute('data-theme');
+document.documentElement.removeAttribute('data-theme');
+const SOURCE_SNAPSHOT='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+if(_bootTheme)document.documentElement.setAttribute('data-theme',_bootTheme);
+function buildProgramCopy(locks){
+  // the marker is assembled in pieces so this block never contains the
+  // literal being replaced — only the real declaration in block 1 matches
+  const decl='const PROGRAM_'+'LOCKS=';
+  const mark=' /*PROGRAM_'+'LOCKS*/';
+  const needle=decl+'{};'+mark;
+  if(!SOURCE_SNAPSHOT.includes(needle))return null;
+  return SOURCE_SNAPSHOT.replace(needle,decl+JSON.stringify(locks||{})+';'+mark);
+}
+if(locked('tools'))document.querySelectorAll('[data-action="dataTools"],[data-action="importSheets"],[data-action="downloadSheetTemplates"]').forEach(x=>x.style.display='none');
+render();
+checkBackup().then(()=>{if(!roles.length&&!people.length)setStatus('Ready — open your CSV database or add records.')});
+Object.assign(window.__APP__,{buildProgramCopy,locked,lockNotice});
+Object.defineProperty(window.__APP__,'programLocks',{get:()=>PROGRAM_LOCKS});
+Object.defineProperty(window.__APP__,'peopleShowWhere',{get:()=>peopleShowWhere});
 </script>
 </body>
 </html>

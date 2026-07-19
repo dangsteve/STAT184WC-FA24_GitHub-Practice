@@ -35,7 +35,12 @@ only — the CSV file is always the real database, so keep saving.
   candidates from the Candidate Box onto roles; drag slate rows to re-prioritize.
   Tabs are yours to manage (the **+** tab or ⋯ → *Manage tabs*).
 - **Candidates** — every person, stored once by Person ID. Edits update every
-  slate that references them.
+  slate that references them. The **✕** at the end of a row deletes that person
+  everywhere (after asking) — their slate rows go too, and Undo brings it all
+  back. Tick **Show roles & tabs** (off by default) to add two columns showing
+  every role they're in — the seat they hold marked "(seat)" plus every slate —
+  and which board tabs those roles live on. The tick is remembered on your
+  computer and never changes the data.
 - **Insights** — bench coverage, Ready-Now coverage, vacancies, and the roles
   that need attention (the filter bar applies to these), plus **My Dashboard**:
   up to 8 widgets of your own — a count or % with an optional filter ("roles
@@ -147,6 +152,17 @@ CSV and become available everywhere, including rule builders and filters.
   Excel workbook. When they send it back, *Import & merge* calculates what's
   new or changed against your database and shows it in the review before
   anything is applied. Deletions don't sync — remove records in the master.
+- **Give them the program too.** In the same Share drawer, tick *Also download
+  a copy of the planner itself* — an HTML file downloads right behind the data
+  file, and the other person just opens it in Chrome or Edge (nothing to
+  install). By default it is the **full program**; uncheck any of the six
+  features they shouldn't have — Rules (viewing & editing), Adding roles,
+  Adding candidates, Deleting, Approvals & seat moves, Import & Data Tools —
+  and those are switched off inside their copy, with a plain-words message if
+  they try. Your eligibility and block rules **still run** in their copy either
+  way, and a restricted copy can share data files onward but can never hand out
+  the program or unlock itself. (It's a guard rail for honest colleagues, not a
+  vault — keep the master file with you.)
 - **Starting fresh?** ⋯ → *Download starter template* gives you a small example
   CSV with one row of each type to copy from.
 - **Data Tools (developer)** — ⋯ → *Data Tools* holds the power features:
