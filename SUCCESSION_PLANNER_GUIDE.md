@@ -195,7 +195,11 @@ CSV and become available everywhere, including rule builders and filters.
   - **Add a field**: a one-at-a-time form — name, type, who it applies to,
     press *+ Add Field* and it's live immediately. **Bulk add** sits below it
     for setting up many columns at once (one per line: `Name, type, applies
-    to`), and the built-in field table now lives at the bottom.
+    to`), and the built-in field table now lives at the bottom. The **✕** on
+    a custom field deletes it for everyone — every stored value is removed and
+    the CSV column disappears on the next save (it asks first, and Undo brings
+    it all back). If a rule or dashboard widget uses the field, deletion is
+    refused with the rule or widget named, so nothing quietly breaks.
 
 ## Appearance (the 🎨 button)
 
