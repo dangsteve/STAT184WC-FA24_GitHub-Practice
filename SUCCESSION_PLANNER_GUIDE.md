@@ -40,7 +40,11 @@ only — the CSV file is always the real database, so keep saving.
   are placed by level within their department (dashed lines) until you set one.
 - **All Roles / your boards** — the working boards, grouped by level. Drag
   candidates from the Candidate Box onto roles; drag slate rows to re-prioritize.
-  Tabs are yours to manage (the **+** tab or ⋯ → *Manage tabs*).
+  Tabs are yours to manage (the **+** tab or ⋯ → *Manage tabs*). A role's
+  **Board / Tab(s)** field is a multiselect — tick every tab it should appear
+  on, and it shows up on all of them. On any of your tabs, **+ Add Existing
+  Roles** opens a searchable pick-list to pull many existing roles onto that
+  tab at once (they keep their other tabs; Undo takes them off again).
   **Filters are chips now**: click a chip (Level, Department, Risk, Readiness)
   and tick as many values as you like — two departments show both. *All
   (clear)* resets a chip, **✕** removes it entirely, and **+ Filter** adds any
@@ -66,9 +70,9 @@ only — the CSV file is always the real database, so keep saving.
   that need attention (the filter bar applies to these), plus **My Dashboard**:
   up to 8 widgets of your own — a count or % with an optional filter ("roles
   where risk equals High"), a sum or average of a Number field, or a **bar,
-  pie or donut** breakdown by any field. **+ Add widget** builds one in a few
-  clicks, ✕ removes it, and widgets are saved in the CSV so the whole team
-  sees them.
+  pie or donut** breakdown by any field — **hover a slice or a bar** to see
+  the exact count and share. **+ Add widget** builds one in a few clicks,
+  ✕ removes it, and widgets are saved in the CSV so the whole team sees them.
 - **Rules** — the guardrails. Flip a rule on/off right in the list.
 - **History** — the audit trail, saved inside the CSV.
 

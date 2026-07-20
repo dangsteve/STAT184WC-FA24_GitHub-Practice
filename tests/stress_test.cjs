@@ -811,7 +811,7 @@ function parseCsvRows(text) {
   });
   await test('assign role to new board via role drawer; appears on that tab', async () => {
     await page.evaluate(() => __APP__.openRoleDrawer('R-CEO'));
-    await setSelect(page, 'rBoard', 'BOARD-TEST');
+    await page.evaluate(() => [...document.querySelectorAll('.roleBoardCheck')].find(c => c.value === 'BOARD-TEST').click());
     await page.click('#drawerSave');
     await page.click('[data-action="tab"][data-tab-id="BOARD-TEST"]');
     assertEq(await page.locator('.role').count(), 1, 'one role on new board');
@@ -2813,6 +2813,76 @@ function parseCsvRows(text) {
     assertEq(d.dashed.join(','), 'R-CEO,R-DIR-SALES', 'only the CEO and the demo dashed role lack Reports To');
     assertEq(d.vacant, 2, 'two vacancies to demo (CRO + Director of Ops)');
     assert(d.rt, 'demo round-trips byte-stable');
+  });
+
+  await test('a role can live on several tabs at once (multiselect Board/Tab)', async () => {
+    await loadBase(page);
+    const tabs = await page.evaluate(() => __APP__.boards.filter(b => !['MASTER','ALL','PEOPLE','INSIGHTS','RULES','HISTORY'].includes(b.id)).slice(0, 2).map(b => b.id));
+    await page.evaluate(() => __APP__.openRoleDrawer('R-CEO'));
+    await page.evaluate(tabs => {
+      [...document.querySelectorAll('.roleBoardCheck')].forEach(c => { if (c.checked !== tabs.includes(c.value)) c.click(); });
+    }, tabs);
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.roles.find(r => r.id === 'R-CEO').boardId), tabs.join('|'), 'both tabs saved as a pipe list');
+    const counts2 = await page.evaluate(tabs => tabs.map(t => { __APP__.activeTab = t; __APP__.render(); return [...document.querySelectorAll('.role')].some(el => el.dataset.roleId === 'R-CEO'); }), tabs);
+    assert(counts2.every(Boolean), 'the role shows on BOTH tabs');
+    await loadBase(page, await csvOf(page));
+    assertEq(await page.evaluate(() => __APP__.roles.find(r => r.id === 'R-CEO').boardId), tabs.join('|'), 'multi-tab membership round-trips');
+    // the person drawer names every tab
+    const inc = await page.evaluate(() => __APP__.roles.find(r => r.id === 'R-CEO').incumbentPersonId);
+    if (inc) {
+      await page.evaluate(pid => __APP__.openPersonDrawer(pid), inc);
+      const body = await page.evaluate(() => document.getElementById('drawerBody').textContent);
+      const names = await page.evaluate(tabs => tabs.map(t => __APP__.boards.find(b => b.id === t).name), tabs);
+      assert(names.every(n => body.includes(n)), 'appears-panel lists every tab the seat is on');
+      await page.evaluate(() => __APP__.closeDrawer());
+    }
+  });
+  await test('+ Add Existing Roles: searchable multiselect adds many roles to the open tab', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const tab = __APP__.boards.find(b => !['MASTER','ALL','PEOPLE','INSIGHTS','RULES','HISTORY'].includes(b.id));
+      __APP__.activeTab = tab.id; __APP__.render();
+      const off = __APP__.roles.filter(r => !String(r.boardId || '').split('|').includes(tab.id) && tab.name !== r.department).slice(0, 2);
+      return { tab: tab.id, add: off.map(r => r.id), before: document.querySelectorAll('.role').length, keep: off[0].boardId };
+    });
+    assertEq(t.add.length, 2, 'two off-tab roles to add');
+    await page.click('[data-action="addRolesToTab"]');
+    // the filter narrows the list
+    const title = await page.evaluate(rid => __APP__.roles.find(r => r.id === rid).title, t.add[0]);
+    await page.evaluate(q => { const f = document.querySelector('#drawerBody .rpFilter'); f.value = q; f.dispatchEvent(new Event('input', { bubbles: true })); }, title);
+    const visible = await page.evaluate(() => [...document.querySelectorAll('#drawerBody label[data-rp]')].filter(l => l.style.display !== 'none').length);
+    assert(visible < 5, 'search narrows the role list (visible: ' + visible + ')');
+    await page.evaluate(q => { const f = document.querySelector('#drawerBody .rpFilter'); f.value = ''; f.dispatchEvent(new Event('input', { bubbles: true })); }, '');
+    await page.evaluate(t => t.add.forEach(id => [...document.querySelectorAll('.tabRoleCheck')].find(c => c.value === id).click()), t);
+    await page.click('#drawerSave');
+    const after = await page.evaluate(t => ({
+      shown: document.querySelectorAll('.role').length,
+      onTab: t.add.every(id => String(__APP__.roles.find(r => r.id === id).boardId).split('|').includes(t.tab)),
+      kept: String(__APP__.roles.find(r => r.id === t.add[0]).boardId).includes(t.keep || ''),
+    }), t);
+    assertEq(after.shown, t.before + 2, 'both roles now show on the tab');
+    assert(after.onTab, 'tab appended to each role');
+    assert(after.kept, 'existing tab memberships kept');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'ROLE' && r.roleId === t.add[0] && r.boardId.split('|').includes(t.tab)), 'persisted to CSV');
+    await page.evaluate(() => __APP__.undoLastAction());
+    assert(!(await page.evaluate(t => String(__APP__.roles.find(r => r.id === t.add[0]).boardId).split('|').includes(t.tab), t)), 'undo removes them again');
+  });
+  await test('pie/donut slices and dashboard bars show counts on hover', async () => {
+    await loadBase(page);
+    const svg = await page.evaluate(() => __APP__.donutSvg([['Alpha', 3], ['Beta', 1]], 4, true));
+    assert(svg.includes('<title>Alpha: 3 (75%)</title>'), 'slice tooltip carries label, count and percent');
+    assert(svg.includes('<title>Beta: 1 (25%)</title>'), 'every slice gets one');
+    const full = await page.evaluate(() => __APP__.donutSvg([['Only', 5]], 5, false));
+    assert(full.includes('<title>Only: 5 (100%)</title>'), 'the full-circle slice too');
+    await page.evaluate(() => {
+      __APP__.insightWidgets.push({ id: 'W-HOVER', title: 'Roles by level', source: 'roles', kind: 'bar', field: 'level' });
+      __APP__.activeTab = 'INSIGHTS'; __APP__.render();
+    });
+    const barTip = await page.evaluate(() => document.querySelector('.insight-card .track[title]')?.getAttribute('title') || '');
+    assert(/: \d+ of \d+/.test(barTip), 'bar tracks carry a "value of total" tooltip: ' + barTip);
+    await page.evaluate(() => { __APP__.insightWidgets.pop(); __APP__.render(); });
   });
 
   /* ===================================================================

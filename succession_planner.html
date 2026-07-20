@@ -768,7 +768,7 @@ function handleCustomSelect(sel){
       pushUndo('Add manager role option');
       const id=makeUniqueRoleId(value);
       const dept=v('rDept')&&v('rDept')!=='__ADD__'?v('rDept'):'';
-      roles.push({id,title:value,level:v('rLevel')&&v('rLevel')!=='__ADD__'?v('rLevel'):'Manager',department:dept,boardId:v('rBoard')&&v('rBoard')!=='__ADD__'?v('rBoard'):'',managerRoleId:'',incumbentPersonId:'',incumbentName:'VACANT',risk:'Medium',criticality:'Medium',owner:'',status:'Manager Role Added',sortOrder:roles.length+1});
+      roles.push({id,title:value,level:v('rLevel')&&v('rLevel')!=='__ADD__'?v('rLevel'):'Manager',department:dept,boardId:checkedValues('roleBoardCheck').join('|'),managerRoleId:'',incumbentPersonId:'',incumbentName:'VACANT',risk:'Medium',criticality:'Medium',owner:'',status:'Manager Role Added',sortOrder:roles.length+1});
       const opt=document.createElement('option');opt.value=id;opt.textContent=value+' ('+id+')';
       sel.insertBefore(opt,sel.querySelector('option[value="__ADD__"]'));
       sel.value=id;sel.dataset.previous=id;
@@ -867,8 +867,8 @@ function loadCSV(text){
     if(o.recordType==='PERSON'&&o.personId)people.push({id:o.personId,name:o.personName,title:o.personTitle,department:o.personDepartment,email:o.personEmail,location:o.location,jobLevel:o.jobLevel,performance:o.performance,potential:o.potential,retentionRisk:o.retentionRisk,mobility:o.mobility,criticalExperience:o.criticalExperience,skills:o.skills,readiness:o.readiness||'1-2 Years',source:o.source||'Internal',candidateType:o.candidateType||'Successor',confidence:o.confidence||'Medium',notes:o.notes,_x:grabExtras(o)});
     if(o.recordType==='ROLE'&&o.roleId){
       roles.push({id:o.roleId,title:o.roleTitle,level:o.level||'VP',department:o.department,boardId:o.boardId,managerRoleId:o.managerRoleId,incumbentPersonId:o.incumbentPersonId,incumbentName:o.incumbentName,risk:o.risk||'Medium',criticality:o.criticality||'High',owner:o.owner,status:o.status||'Active Plan',sortOrder:Number(o.sortOrder||999),_x:grabExtras(o)});
-      // a role naming a board that has no BOARD row auto-creates the tab — HR can add tabs straight from the CSV
-      if(o.boardId&&!boards.some(b=>b.id===o.boardId))boards.push({id:o.boardId,name:prettyBoardName(o.boardId)});
+      // a role naming boards that have no BOARD row auto-creates the tabs — HR can add tabs straight from the CSV
+      if(o.boardId)String(o.boardId).split('|').filter(Boolean).forEach(bid=>{if(!boards.some(b=>b.id===bid))boards.push({id:bid,name:prettyBoardName(bid)})});
     }
     if(o.recordType==='SUCCESSOR'&&o.successorRoleId&&o.personId)successors.push({id:o.roleId||uid('S'),roleId:o.successorRoleId,personId:o.personId,readiness:o.readiness||'1-2 Years',source:o.source||'Internal',candidateType:o.candidateType||'Successor',confidence:o.confidence||'Medium',ranking:Number(o.ranking||999),notes:o.notes,approved:String(o.approved).toLowerCase()==='true',autoMoveQueued:String(o.autoMoveQueued).toLowerCase()==='true',_x:grabExtras(o)});
     if(o.recordType==='RULE'&&o.ruleId){
@@ -1369,7 +1369,7 @@ function filteredRoles(){
   return roles.filter(r=>{
     const ss=byRole.get(r.id)||[];
     const txt=[r.id,r.title,r.level,r.department,r.incumbentName,nm(r.incumbentPersonId),ss.map(s=>nm(s.personId)).join(' ')].join(' ').toLowerCase();
-    const onBoard=SYSTEM_BOARDS.includes(activeTab)||r.boardId===activeTab||boardObj?.name===r.department;
+    const onBoard=SYSTEM_BOARDS.includes(activeTab)||roleOnBoard(r,activeTab)||boardObj?.name===r.department;
     return onBoard&&txt.includes(q)&&passesFilters('role',r,byRole);
   });
 }
@@ -1378,7 +1378,9 @@ function emptyState(big,small,buttons=''){return `<div class="empty"><div class=
 /* ---------- board ---------- */
 function renderBoard(){
   const name=boards.find(b=>b.id===activeTab)?.name||'Board';
-  setView(name==='All Roles'?'All Roles':name+' Board','Drag a candidate from the Candidate Box onto a role. Drag slate rows to reorder priority, or use the arrows.');
+  const canBulkAdd=!SYSTEM_BOARDS.includes(activeTab)&&boards.some(b=>b.id===activeTab);
+  setView(name==='All Roles'?'All Roles':name+' Board','Drag a candidate from the Candidate Box onto a role. Drag slate rows to reorder priority, or use the arrows.',
+    canBulkAdd?'<button class="btn btn-green btn-sm" data-action="addRolesToTab">+ Add Existing Roles</button>':'');
   const fr=filteredRoles();
   const lvls=levels();
   let html='';
@@ -1595,7 +1597,7 @@ function renderPeople(){
       const slateRoles=successors.filter(s=>s.personId===p.id).map(s=>role(s.roleId)).filter(Boolean);
       const seatNames=[...new Set(seatRoles.map(r=>r.title||r.id))];
       const candNames=[...new Set(slateRoles.map(r=>r.title||r.id))];
-      const tabNames=[...new Set([...seatRoles,...slateRoles].map(r=>boardName(r.boardId)).filter(Boolean))];
+      const tabNames=[...new Set([...seatRoles,...slateRoles].flatMap(r=>roleBoards(r).map(boardName)).filter(Boolean))];
       whereCells=`<td title="${attr(seatNames.join(', '))}">${capList(seatNames)}</td><td title="${attr(candNames.join(', '))}">${capList(candNames)}</td><td title="${attr(tabNames.join(', '))}">${capList(tabNames)}</td>`;
     }
     return `<tr class="row-click" data-action="openPerson" data-person-id="${attr(p.id)}">
@@ -1747,6 +1749,15 @@ function renderMessages(){
    ===================================================================== */
 function isDescendant(childId,ancestorId){let cur=role(childId);const seen=new Set();while(cur&&cur.managerRoleId){if(cur.managerRoleId===ancestorId)return true;if(seen.has(cur.managerRoleId))return false;seen.add(cur.managerRoleId);cur=role(cur.managerRoleId)}return false}
 function boardOptions(sel=''){const rows=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).map(b=>`<option value="${attr(b.id)}" ${b.id===sel?'selected':''}>${esc(b.name)}</option>`).join('');return '<option value="">No board (show in All Roles)</option>'+rows+'<option value="__ADD__">+ Add board/tab&hellip;</option>'}
+function roleBoards(r){return String(r&&r.boardId||'').split('|').filter(Boolean)}
+function roleOnBoard(r,tabId){return roleBoards(r).includes(tabId)}
+function boardsCheckboxPicker(cls,selected){
+  const sel=new Set(selected||[]);
+  const customs=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id));
+  const allId=checkboxId();
+  const rows=customs.map(b=>{const id=checkboxId();return `<label for="${id}" data-rp="${attr(norm(b.name+' '+b.id))}"><input id="${id}" type="checkbox" class="${cls}" value="${attr(b.id)}" ${sel.has(b.id)?'checked':''}>${esc(b.name)}</label>`}).join('');
+  return `<div class="value-picker"><input class="rpFilter" placeholder="Filter tabs&hellip;" style="margin-bottom:6px"><label class="select-all" for="${allId}"><input id="${allId}" type="checkbox" class="rpAll" data-cls="${cls}">Select all shown</label>${rows||'<div class="hint">No custom tabs yet — use + New tab.</div>'}</div>`;
+}
 function roleOptions(sel=''){return '<option value="">No Manager / Root</option>'+roles.map(r=>`<option value="${attr(r.id)}" ${r.id===sel?'selected':''}>${esc(r.title)} (${esc(r.id)})</option>`).join('')+'<option value="__ADD__">+ Add new manager role&hellip;</option>'}
 function targetRoleOptions(sel=''){return '<option value=""></option>'+roles.map(r=>`<option value="${attr(r.id)}" ${r.id===sel?'selected':''}>${esc(r.title)} (${esc(r.id)})</option>`).join('')}
 function personOptions(sel=''){return '<option value="">VACANT</option>'+people.map(p=>`<option value="${attr(p.id)}" ${p.id===sel?'selected':''}>${esc(p.name)} (${esc(p.id)})</option>`).join('')}
@@ -1862,7 +1873,7 @@ function personForm(p){
 function personSlateSection(pid){
   const cur=currentRoleForPerson(pid);
   const slates=successors.filter(s=>s.personId===pid).sort((a,b)=>(+a.ranking||999)-(+b.ranking||999));
-  const tabOf=r=>{const b=r&&boards.find(x=>x.id===r.boardId);return b?` · <span class="hint">${esc(b.name)} tab</span>`:''};
+  const tabOf=r=>{const ns=r?roleBoards(r).map(id=>boards.find(x=>x.id===id)?.name).filter(Boolean):[];return ns.length?` · <span class="hint">${esc(ns.join(', '))} tab${ns.length>1?'s':''}</span>`:''};
   let html=`<div class="drawer-section-title">Where this person appears</div>`;
   html+=`<div class="panel">${cur?`Current incumbent of <b>${esc(cur.title)}</b> (${esc(cur.id)})${tabOf(cur)}`:'Not currently an incumbent of any role.'}</div>`;
   html+=slates.length?slates.map(s=>{
@@ -1956,7 +1967,7 @@ function openRoleDrawer(id=''){
       <div><label>Role Title *</label><input id="rTitle" value="${attr(r.title)}"></div>
       <div><label>Level</label>${formControl('rLevel',DEFAULT_LEVELS,r.level,'level')}</div>
       <div><label>Department</label>${formControl('rDept',[],r.department,'department')}</div>
-      <div><label>Board / Tab</label><select id="rBoard" data-change="customSelect">${boardOptions(r.boardId)}</select></div>
+      <div><label>Board / Tab(s)</label>${boardsCheckboxPicker('roleBoardCheck',roleBoards(r))}<div class="hint" style="margin-top:4px">Tick every tab this role appears on — All Roles always shows everything. <button type="button" class="btn btn-quiet btn-sm" data-action="manageTabs" style="margin-left:6px">+ New tab&hellip;</button></div></div>
       <div><label>Reports To</label><select id="rManager" data-change="customSelect">${roleOptions(r.managerRoleId)}</select><div class="hint" style="margin-top:3px">The role this one reports to — this is what builds the Org Tree. Board tabs are separate and stay as you set them.</div></div>
       <div><label>Current Person</label><select id="rInc">${personOptions(r.incumbentPersonId)}</select></div>
       <div><label>Risk</label>${formControl('rRisk',['High','Medium','Low'],r.risk,'risk')}</div>
@@ -1994,7 +2005,7 @@ function saveRole(oldId=''){
   pushUndo(oldId?'Update role':'Add role');
   const val=x=>v(x)==='__ADD__'?'':v(x);
   const inc=v('rInc');
-  const obj={id,title,level:val('rLevel')||'VP',department:val('rDept'),boardId:val('rBoard'),managerRoleId:managerId,incumbentPersonId:inc,incumbentName:inc?personName(inc):'VACANT',risk:val('rRisk'),criticality:val('rCrit'),owner:v('rOwner'),status:v('rStatus'),sortOrder:Number(v('rSort')||999),_x:collectExtras(oldId?role(oldId)?._x:undefined)};
+  const obj={id,title,level:val('rLevel')||'VP',department:val('rDept'),boardId:checkedValues('roleBoardCheck').join('|'),managerRoleId:managerId,incumbentPersonId:inc,incumbentName:inc?personName(inc):'VACANT',risk:val('rRisk'),criticality:val('rCrit'),owner:v('rOwner'),status:v('rStatus'),sortOrder:Number(v('rSort')||999),_x:collectExtras(oldId?role(oldId)?._x:undefined)};
   const ix=oldId?roles.findIndex(r=>r.id===oldId):-1;
   if(ix>=0){roles[ix]=obj;if(oldId!==id)renameRoleRefs(oldId,id)}else roles.push(obj);
   log('Role Saved',`${title} (${id}) saved`);
@@ -2130,10 +2141,10 @@ function customMapRowHtml(m={roleId:'',personId:''}){
   </div>`;
 }
 function addCustomMapRow(m){el('customMapRows').insertAdjacentHTML('beforeend',customMapRowHtml(m))}
-function rolesCheckboxPicker(cls,selected){
+function rolesCheckboxPicker(cls,selected,list){
   const sel=new Set(selected||[]);
   const allId=checkboxId();
-  const rows=roles.map(r=>{const id=checkboxId();return `<label for="${id}" data-rp="${attr(norm(r.title+' '+r.id))}"><input id="${id}" type="checkbox" class="${cls}" value="${attr(r.id)}" ${sel.has(r.id)?'checked':''}>${esc(r.title)}&nbsp;<span class="hint">(${esc(r.id)})</span></label>`}).join('');
+  const rows=(list||roles).map(r=>{const id=checkboxId();return `<label for="${id}" data-rp="${attr(norm(r.title+' '+r.id))}"><input id="${id}" type="checkbox" class="${cls}" value="${attr(r.id)}" ${sel.has(r.id)?'checked':''}>${esc(r.title)}&nbsp;<span class="hint">(${esc(r.id)})</span></label>`}).join('');
   return `<div class="value-picker"><input class="rpFilter" placeholder="Filter roles&hellip;" style="margin-bottom:6px"><label class="select-all" for="${allId}"><input id="${allId}" type="checkbox" class="rpAll" data-cls="${cls}">Select all shown</label>${rows||'<div class="hint">No roles yet.</div>'}</div>`;
 }
 function peopleCheckboxPicker(cls,selected){
@@ -2274,6 +2285,24 @@ function toggleRule(id,on){
 /* ---------- manage tabs drawer ---------- */
 function tabRowHtml(b={id:'',name:''}){return `<div class="tab-row"><div><label>Board ID</label><input class="bId" value="${attr(b.id||uid('BOARD'))}"></div><div><label>Board Name</label><input class="bName" value="${attr(b.name||'New Tab')}"></div><button class="btn btn-danger btn-sm" type="button" data-action="removeParent" data-target=".tab-row" style="align-self:end">Remove</button></div>`}
 function addBoardRow(){el('boardRows').insertAdjacentHTML('beforeend',tabRowHtml({id:uid('BOARD'),name:'New Tab'}))}
+function openAddRolesToTab(){
+  const b=boards.find(x=>x.id===activeTab);
+  if(!b||SYSTEM_BOARDS.includes(b.id)){notice('WARN','Open one of your board tabs first.');return}
+  trackDrawer('addRolesTab:'+b.id,()=>openAddRolesToTab());
+  const candidates=roles.filter(r=>!roleOnBoard(r,b.id)).sort((a,c)=>String(a.title).localeCompare(String(c.title)));
+  openDrawer(`Add Roles to ${b.name}`,'Tick existing roles to put on this tab — they keep every tab they are already on. Search to narrow the list.',
+    candidates.length?rolesCheckboxPicker('tabRoleCheck',[],candidates):'<div class="hint">Every role is already on this tab.</div>',
+    ()=>{
+      const ids=checkedValues('tabRoleCheck');
+      if(!ids.length){notice('WARN','Tick at least one role (or press Close).');return}
+      pushUndo('Add roles to tab');
+      ids.forEach(id=>{const r=role(id);if(r&&!roleOnBoard(r,b.id))r.boardId=[...roleBoards(r),b.id].join('|')});
+      log('Tab Updated',`${plur(ids.length,'role')} added to the ${b.name} tab`);
+      notice('OK',`${plur(ids.length,'role')} added to ${b.name}.`);
+      closeDrawer();render();
+    });
+  el('drawerSave').textContent='Add to Tab';
+}
 function openBoardDrawer(){
   trackDrawer('boards',()=>openBoardDrawer());
   const rows=boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).map(b=>tabRowHtml(b)).join('');
@@ -2284,6 +2313,7 @@ function openBoardDrawer(){
       const ids=[...document.querySelectorAll('#boardRows .bId')],names=[...document.querySelectorAll('#boardRows .bName')];
       boards=systemBoards();
       ids.forEach((x,i)=>{const bid=x.value.trim(),bnm=names[i].value.trim();if(bid&&bnm&&!boards.some(b=>b.id===bid))boards.push({id:bid,name:bnm})});
+      roles.forEach(r=>{const kept=roleBoards(r).filter(id=>boards.some(b=>b.id===id));if(kept.join('|')!==String(r.boardId||''))r.boardId=kept.join('|')});
       if(!boards.some(b=>b.id===activeTab))activeTab='MASTER';
       log('Tabs Saved',`${boards.length-SYSTEM_TABS.length} custom tabs saved`);
       notice('OK','Tabs updated.');
@@ -2378,7 +2408,7 @@ function chessRoleGroups(){
   const bySort=(a,b)=>li(a.level)-li(b.level)||(+a.sortOrder||999)-(+b.sortOrder||999);
   const groups=[];const used=new Set();
   boards.filter(b=>!SYSTEM_BOARDS.includes(b.id)).forEach(b=>{
-    const rs=roles.filter(r=>!used.has(r.id)&&(r.boardId===b.id||b.name===r.department)).sort(bySort);
+    const rs=roles.filter(r=>!used.has(r.id)&&(roleOnBoard(r,b.id)||b.name===r.department)).sort(bySort);
     rs.forEach(r=>used.add(r.id));
     if(rs.length)groups.push({name:b.name,roles:rs});
   });
@@ -2578,6 +2608,7 @@ const ACTIONS={
   undo:()=>undoLastAction(),
   toggleMenu:()=>el('moreMenu').classList.toggle('open'),
   manageTabs:()=>{el('moreMenu').classList.remove('open');openBoardDrawer()},
+  addRolesToTab:()=>openAddRolesToTab(),
   resetOrg:()=>{el('moreMenu').classList.remove('open');resetOrgChanges()},
   clearAll:()=>{el('moreMenu').classList.remove('open');clearAll()},
   dismissBanner:()=>{bannerState.backup=null;renderBanners()},
@@ -2975,10 +3006,12 @@ function buildSheetImport(fileTexts,dbExtras,base){
           }
         }
         if(String(o.boardRef??'').trim()!==''){
-          const ref=String(o.boardRef).trim();
-          let b=staged.boards.find(bb=>bb.id===ref)||staged.boards.find(bb=>norm(bb.name)===norm(ref));
-          if(!b){b={id:/^BOARD-/i.test(ref)?ref.toUpperCase():'BOARD-'+(ref.toUpperCase().replace(/[^A-Z0-9]+/g,'-')||'X'),name:/^BOARD-/i.test(ref)?prettyBoardName(ref):ref};staged.boards.push(b);chg({t:'add',entity:'board',id:b.id,label:b.name});add(sheet.ft.name,rowNum,label,id,'board','WARNING',`New board tab "${b.name}" was created`,'Check Manage Tabs if unwanted')}
-          rset('boardId',b.id);
+          const bids=String(o.boardRef).split(/[|;]/).map(x=>x.trim()).filter(Boolean).map(ref=>{
+            let b=staged.boards.find(bb=>bb.id===ref)||staged.boards.find(bb=>norm(bb.name)===norm(ref));
+            if(!b){b={id:/^BOARD-/i.test(ref)?ref.toUpperCase():'BOARD-'+(ref.toUpperCase().replace(/[^A-Z0-9]+/g,'-')||'X'),name:/^BOARD-/i.test(ref)?prettyBoardName(ref):ref};staged.boards.push(b);chg({t:'add',entity:'board',id:b.id,label:b.name});add(sheet.ft.name,rowNum,label,id,'board','WARNING',`New board tab "${b.name}" was created`,'Check Manage Tabs if unwanted')}
+            return b.id;
+          });
+          rset('boardId',[...new Set(bids)].join('|'));
         }
       }
       if(sheet.type==='BOARDS'){
@@ -3167,7 +3200,8 @@ function applyImport(){
     if(removedP.size||removedR.size||removedB.size)st.roles.forEach(r=>{
       if(removedP.has(r.incumbentPersonId)){r.incumbentPersonId='';r.incumbentName='VACANT'}
       if(removedR.has(r.managerRoleId))r.managerRoleId='';
-      if(removedB.has(r.boardId))r.boardId='';
+      const kept=String(r.boardId||'').split('|').filter(id=>id&&!removedB.has(id));
+      if(kept.join('|')!==String(r.boardId||''))r.boardId=kept.join('|');
     });
     const byRole=new Map();
     st.successors.forEach(s=>{const a=byRole.get(s.roleId);if(a)a.push(s);else byRole.set(s.roleId,[s])});
@@ -3460,7 +3494,7 @@ function buildScopedData(scope){
   if(ids.includes('ALL'))return{boards:deepClone(boards),people:deepClone(people),roles:deepClone(roles),successors:deepClone(successors),rules:deepClone(rules),history:[],customFieldValues:deepClone(customFieldValues),chessFields:chessDefaultFields||CHESS_DEFAULT_FIELDS};
   const bs=ids.map(id=>boards.find(x=>x.id===id)).filter(Boolean);
   if(!bs.length)return null;
-  const rolesSub=roles.filter(r=>bs.some(b=>r.boardId===b.id||b.name===r.department));
+  const rolesSub=roles.filter(r=>bs.some(b=>roleOnBoard(r,b.id)||b.name===r.department));
   const rids=new Set(rolesSub.map(r=>r.id));
   const succSub=successors.filter(s=>rids.has(s.roleId));
   const pids=new Set([...rolesSub.map(r=>r.incumbentPersonId),...succSub.map(s=>s.personId)].filter(Boolean));
@@ -3750,13 +3784,13 @@ function donutSvg(slices,total,hole){
   let a0=-Math.PI/2;
   const paths=slices.map(([k,n],i)=>{
     const frac=n/total,color=CHART_COLORS[i%CHART_COLORS.length];
-    if(frac>=0.999){a0+=frac*2*Math.PI;return `<circle cx="${C}" cy="${C}" r="${R}" fill="${color}" stroke="#fff" stroke-width="2"/>`}
+    if(frac>=0.999){a0+=frac*2*Math.PI;return `<circle cx="${C}" cy="${C}" r="${R}" fill="${color}" stroke="#fff" stroke-width="2"><title>${esc(String(k))}: ${n} (${Math.round(frac*100)}%)</title></circle>`}
     const a1=a0+frac*2*Math.PI;
     const large=(a1-a0)>Math.PI?1:0;
     const x0=C+R*Math.cos(a0),y0=C+R*Math.sin(a0),x1=C+R*Math.cos(a1),y1=C+R*Math.sin(a1);
     const d=`M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${R} ${R} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} L ${C} ${C} Z`;
     a0=a1;
-    return `<path d="${d}" fill="${color}" stroke="#fff" stroke-width="2"></path>`;
+    return `<path d="${d}" fill="${color}" stroke="#fff" stroke-width="2"><title>${esc(String(k))}: ${n} (${Math.round(frac*100)}%)</title></path>`;
   }).join('');
   const center=hole?`<circle cx="${C}" cy="${C}" r="30" fill="var(--surface)"></circle><text x="${C}" y="${C+6}" text-anchor="middle" style="font-size:17px;font-weight:700;fill:var(--ink)">${total}</text>`:'';
   return `<svg viewBox="0 0 120 120" width="132" height="132" role="img" aria-label="share chart">${paths}${center}</svg>`;
@@ -3772,7 +3806,7 @@ function renderWidgetCards(){
   const cards=insightWidgets.map(w=>{
     const c=computeWidget(w);
     let body;
-    if(c.bars)body=c.bars.map(([k,n])=>`<div class="barrow"><span class="lbl" title="${attr(k)}">${esc(k)}</span><span class="track"><span class="fill" style="width:${pct(n,c.max)}%"></span></span><span class="val">${n}</span></div>`).join('')||'<div class="hint">No data.</div>';
+    if(c.bars)body=c.bars.map(([k,n])=>`<div class="barrow"><span class="lbl" title="${attr(k)}">${esc(k)}</span><span class="track" title="${attr(k)}: ${n} of ${c.total??c.max}"><span class="fill" style="width:${pct(n,c.max)}%"></span></span><span class="val">${n}</span></div>`).join('')||'<div class="hint">No data.</div>';
     else if(c.slices){
       const legend=c.slices.map(([k,n],i)=>`<div style="display:flex;align-items:center;gap:7px;font-size:12px;margin:3px 0"><span style="width:10px;height:10px;border-radius:3px;background:${CHART_COLORS[i%CHART_COLORS.length]};flex:none"></span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${attr(k)}">${esc(k)}</span><span style="margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums">${n} · ${pct(n,c.total)}%</span></div>`).join('');
       body=`<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><div>${donutSvg(c.slices,c.total,w.kind==='donut')}</div><div style="flex:1;min-width:140px">${legend||'<div class="hint">No data.</div>'}</div></div>`;
