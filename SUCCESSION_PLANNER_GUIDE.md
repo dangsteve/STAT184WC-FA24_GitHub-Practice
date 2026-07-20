@@ -180,9 +180,12 @@ CSV and become available everywhere, including rule builders and filters.
   itself.
 - **Share one board — or several.** ⋯ → *Share / export a board* exports
   **Everything** by default; flip the switch off and tick exactly the board
-  tabs you want to hand over (their roles, the people on those slates, nothing
-  else) as a planner CSV — the other person opens it in their own copy and
-  sees only those boards — or as an Excel workbook. When they send it back, *Import & merge* calculates what's
+  tabs you want to hand over (their roles, the people on those slates — plus
+  **the rules that touch those boards**: all-roles eligibility rules and any
+  rule aimed at a shared role travel along and keep enforcing in the other
+  person's copy, while rules about other boards stay home) as a planner CSV —
+  the other person opens it in their own copy and sees only those boards — or
+  as an Excel workbook. When they send it back, *Import & merge* calculates what's
   new or changed against your database and shows it in the review before
   anything is applied. Deletions don't sync — remove records in the master.
 - **Give them the program too.** In the same Share drawer, tick *Also download
@@ -196,8 +199,11 @@ CSV and become available everywhere, including rule builders and filters.
   way, and a restricted copy can share data files onward but can never hand out
   the program or unlock itself. (It's a guard rail for honest colleagues, not a
   vault — keep the master file with you.)
-- **Starting fresh?** ⋯ → *Download starter template* gives you a small example
-  CSV with one row of each type to copy from.
+- **Starting fresh?** ⋯ → *Download a template…* asks which starting point
+  you want: the **starter planner CSV** (one example row of each type), the
+  **simple sheet templates** (three small CSVs with friendly headers), or the
+  **sample Excel workbook** (the exact tabs Import & merge understands). The
+  same chooser lives inside Data Tools next to Import & merge.
 - **Data Tools (developer)** — ⋯ → *Data Tools* holds the power features:
   - **File converters**: upload an Excel workbook and download it as a planner
     CSV (with the usual review + error report), or upload a planner CSV and

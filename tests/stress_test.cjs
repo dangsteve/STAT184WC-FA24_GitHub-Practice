@@ -1309,12 +1309,21 @@ function parseCsvRows(text) {
     const mgr2 = await page.evaluate(() => __APP__.roles.find(r => r.id === 'RV').managerRoleId);
     assertEq(mgr2, '', 'undo restores');
   });
-  await test('starter template menu item downloads without breaking anything', async () => {
+  await test('one "Download a template…" chooser covers starter CSV, simple sheets and the Excel sample', async () => {
     await loadBase(page);
     await clickAction(page, 'toggleMenu');
-    await page.click('#moreMenu [data-action="downloadTemplate"]');
+    assert(await page.evaluate(() => !document.querySelector('#moreMenu [data-action="downloadTemplate"]') && !document.querySelector('#moreMenu [data-action="downloadSheetTemplates"]') && !document.querySelector('#moreMenu [data-action="downloadSampleXlsx"]')), 'the three separate menu items are gone');
+    await page.click('#moreMenu [data-action="templateChooser"]');
+    const opts = await page.evaluate(() => [...document.getElementById('templateChoice').options].map(o => o.value));
+    assertEq(opts.join(','), 'starter,sheets,xlsx', 'single-select offers all three templates');
+    await page.click('#drawerSave'); // default: starter
     const msg = await lastMsg(page);
-    assert(msg && msg.type === 'OK' && msg.message.includes('template'), 'template toast shown');
+    assert(msg && msg.type === 'OK' && msg.message.includes('template'), 'starter template downloads');
+    await page.evaluate(() => { __APP__.openTemplateChooser ? __APP__.openTemplateChooser() : document.querySelector('[data-action="templateChooser"]').click(); });
+    await setSelect(page, 'templateChoice', 'xlsx');
+    await page.click('#drawerSave');
+    const msg2 = await lastMsg(page);
+    assert(msg2.message.includes('Sample workbook'), 'the Excel sample downloads from the same chooser');
   });
 
   /* ===================================================================
@@ -2585,9 +2594,9 @@ function parseCsvRows(text) {
 
   await test('sample Excel workbook: offered in menu + Data Tools, and imports back cleanly (format proof)', async () => {
     await loadBase(page);
-    assert(await page.evaluate(() => !!document.querySelector('#moreMenu [data-action="downloadSampleXlsx"]')), 'menu item exists');
+    assert(await page.evaluate(() => !!document.querySelector('#moreMenu [data-action="templateChooser"]')), 'template chooser in the menu');
     await page.evaluate(() => __APP__.openDataTools());
-    assert(await page.evaluate(() => !!document.querySelector('#drawerBody [data-action="downloadSampleXlsx"]') && !!document.querySelector('#drawerBody [data-action="downloadSheetTemplates"]')), 'sample Excel + sample CSV buttons inside Import & merge');
+    assert(await page.evaluate(() => !!document.querySelector('#drawerBody [data-action="templateChooser"]')), 'one template button inside Import & merge (no duplicate sample buttons)');
     await page.evaluate(() => __APP__.closeDrawer());
     const res = await page.evaluate(async () => {
       const bytes = __APP__.makeXlsx(__APP__.workbookSheets(__APP__.sampleWorkbookData()));
@@ -2883,6 +2892,34 @@ function parseCsvRows(text) {
     const barTip = await page.evaluate(() => document.querySelector('.insight-card .track[title]')?.getAttribute('title') || '');
     assert(/: \d+ of \d+/.test(barTip), 'bar tracks carry a "value of total" tooltip: ' + barTip);
     await page.evaluate(() => { __APP__.insightWidgets.pop(); __APP__.render(); });
+  });
+
+  await test('scoped shares carry the rules that touch those boards — and enforce for the recipient', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const onB = id => __APP__.roles.find(r => String(r.boardId || '').split('|').includes(id));
+      const customs = __APP__.boards.filter(b => !['MASTER','ALL','PEOPLE','INSIGHTS','RULES','HISTORY'].includes(b.id) && onB(b.id));
+      const bx = customs[0], by = customs[1];
+      const rx = onB(bx.id), ry = onB(by.id);
+      __APP__.rules.push(
+        { id: 'RULE-SC-GEN', name: 'Generic bar', type: 'FIELD_RULE', scope: 'Candidate', field: 'readiness', operator: 'equals', value: 'Ready Now', personId: '', targetRoleId: '', altPersonId: '', severity: 'Block', message: 'GEN', enabled: true },
+        { id: 'RULE-SC-X', name: 'Scoped to X', type: 'FIELD_RULE', scope: 'Candidate', field: 'readiness', operator: 'equals', value: 'Ready Now', personId: '', targetRoleId: rx.id, altPersonId: '', severity: 'Block', message: 'SCX', enabled: true },
+        { id: 'RULE-SC-Y', name: 'Scoped to Y', type: 'FIELD_RULE', scope: 'Candidate', field: 'readiness', operator: 'equals', value: 'Ready Now', personId: '', targetRoleId: ry.id, altPersonId: '', severity: 'Block', message: 'SCY', enabled: true },
+        { id: 'RULE-BLK-X', name: 'Block into X', type: 'BLOCK', scope: 'Candidate', field: '', operator: 'cannot move to target role', value: '', personId: __APP__.people[0].id, targetRoleId: rx.id, altPersonId: '', severity: 'Block', message: 'BLKX', enabled: true },
+      );
+      const d = __APP__.buildScopedData(bx.id);
+      return { ids: d.rules.map(r => r.id), csv: __APP__.toCSV(d), rxId: rx.id, p: __APP__.people[0].id };
+    });
+    assert(t.ids.includes('RULE-SC-GEN'), 'all-roles eligibility rules travel');
+    assert(t.ids.includes('RULE-SC-X'), 'rules scoped to a shared role travel');
+    assert(t.ids.includes('RULE-BLK-X'), 'blocks targeting a shared role travel');
+    assert(!t.ids.includes('RULE-SC-Y'), 'rules scoped only to other boards stay home');
+    await loadBase(page, t.csv); // recipient opens the share
+    const enforced = await page.evaluate(t => {
+      const s = { roleId: t.rxId, personId: t.p, readiness: 'Ready Now', source: 'Internal', confidence: 'High' };
+      return __APP__.evaluateRules(s).blocks.some(m => m.includes('BLKX'));
+    }, t);
+    assert(enforced, "the shared block still fires in the recipient's copy");
   });
 
   /* ===================================================================
