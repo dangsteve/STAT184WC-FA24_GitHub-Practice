@@ -567,7 +567,7 @@ function parseCsvRows(text) {
     await typeInto(page, 'ruleId', 'RULE-BLOCK-T2');
     await setSelect(page, 'ruleType', 'BLOCK');
     await page.evaluate(pid => [...document.querySelectorAll('.blockPersonCheck')].find(c => c.value === pid).click(), t.pid);
-    await setSelect(page, 'ruleBlockOperator', 'cannot change role');
+    await page.evaluate(() => { const sel = document.querySelector('.blockOperator'); sel.value = 'cannot change role'; sel.dispatchEvent(new Event('change', { bubbles: true })); });
     await page.click('#drawerSave');
     await page.evaluate(sid => __APP__.approveSuccessor(sid), t.sid);
     const inc = await page.evaluate(t => __APP__.roles.find(r => r.id === t.roleId).incumbentPersonId, t);
@@ -2723,6 +2723,96 @@ function parseCsvRows(text) {
     assert(body.includes('Reports To'), 'label renamed');
     assert(body.includes('builds the Org Tree'), 'hint explains what it does');
     await page.evaluate(() => __APP__.closeDrawer());
+  });
+
+  await test('one BLOCK rule holds several person→roles entries (+ Add Another Block)', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => ({ p1: __APP__.people[0].id, p2: __APP__.people[1].id }));
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-2BLOCKS');
+    await setSelect(page, 'ruleType', 'BLOCK');
+    await typeInto(page, 'ruleMsg', 'TWO-BLOCK-HIT');
+    await page.click('[data-action="addBlockRow"]');
+    assertEq(await page.evaluate(() => document.querySelectorAll('#blockRows .block-row').length), 2, 'second entry added');
+    await page.evaluate(t => {
+      const rows = document.querySelectorAll('#blockRows .block-row');
+      [...rows[0].querySelectorAll('.blockPersonCheck')].find(c => c.value === t.p1).click();
+      [...rows[0].querySelectorAll('.blockTargetCheck')].find(c => c.value === 'R-CEO').click();
+      [...rows[1].querySelectorAll('.blockPersonCheck')].find(c => c.value === t.p2).click();
+      [...rows[1].querySelectorAll('.blockTargetCheck')].find(c => c.value === 'R-CFO').click();
+    }, t);
+    await page.click('#drawerSave');
+    const saved = await page.evaluate(() => { const r = __APP__.rules.find(x => x.id === 'RULE-2BLOCKS'); return { entries: JSON.parse(r.value).length, personId: r.personId }; });
+    assertEq(saved.entries, 2, 'both entries stored in one rule');
+    assertEq(saved.personId, t.p1, 'first entry mirrored to the legacy columns');
+    const v = await page.evaluate(t => {
+      const mk = (pid, rid) => ({ roleId: rid, personId: pid, readiness: 'Ready Now', source: 'Internal', confidence: 'High' });
+      const hit = (pid, rid) => __APP__.evaluateRules(mk(pid, rid)).blocks.some(m => m.includes('TWO-BLOCK-HIT'));
+      return { a: hit(t.p1, 'R-CEO'), b: hit(t.p1, 'R-CFO'), c: hit(t.p2, 'R-CFO'), d: hit(t.p2, 'R-CEO') };
+    }, t);
+    assert(v.a && !v.b, 'entry 1 blocks its own person on its own role only');
+    assert(v.c && !v.d, 'entry 2 does the same with a different pairing');
+    await page.evaluate(() => { __APP__.activeTab = 'RULES'; __APP__.render(); });
+    assert((await page.evaluate(() => document.body.textContent)).includes('+1 more block'), 'rule list mentions the extra entry');
+    await loadBase(page, await csvOf(page)); // round-trip
+    const rt = await page.evaluate(t => {
+      const mk = (pid, rid) => ({ roleId: rid, personId: pid, readiness: 'Ready Now', source: 'Internal', confidence: 'High' });
+      const hit = (pid, rid) => __APP__.evaluateRules(mk(pid, rid)).blocks.some(m => m.includes('TWO-BLOCK-HIT'));
+      return hit(t.p1, 'R-CEO') && hit(t.p2, 'R-CFO');
+    }, t);
+    assert(rt, 'both entries survive the CSV round-trip');
+    // the last remaining entry cannot be removed
+    await page.evaluate(() => __APP__.openRuleDrawer('RULE-2BLOCKS'));
+    await page.evaluate(() => document.querySelectorAll('[data-action="removeBlockRow"]')[1].click());
+    await page.click('[data-action="removeBlockRow"]');
+    const guard = await lastMsg(page);
+    assert(guard.message.includes('at least one entry'), 'removing the last entry is refused');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('color themes paint the header; Clean White is default with the ink SP mark', async () => {
+    await loadBase(page);
+    const themes = await page.evaluate(() => { __APP__.openAppearanceDrawer(); return [...document.querySelectorAll('[data-action="setTheme"]')].map(b => b.dataset.value); });
+    assertEq(themes[0], 'default', 'Clean White offered first');
+    assertEq(themes.length, 6, 'six themes');
+    await page.click('[data-action="setTheme"][data-value="classic"]');
+    const blue = await page.evaluate(() => ({
+      bar: getComputedStyle(document.querySelector('.appbar')).backgroundImage,
+      mark: getComputedStyle(document.querySelector('.brand-mark')).backgroundColor,
+      name: getComputedStyle(document.querySelector('.brand-name')).color,
+    }));
+    assert(blue.bar.includes('linear-gradient'), 'Classic Blue paints the app bar');
+    assertEq(blue.mark, 'rgb(255, 255, 255)', 'SP mark inverts to white on the colored bar');
+    assertEq(blue.name, 'rgb(255, 255, 255)', 'title goes white');
+    await page.click('[data-action="setTheme"][data-value="default"]');
+    const white = await page.evaluate(() => ({
+      bar: getComputedStyle(document.querySelector('.appbar')).backgroundImage,
+      mark: getComputedStyle(document.querySelector('.brand-mark')).backgroundColor,
+    }));
+    assertEq(white.bar, 'none', 'Clean White keeps the white header');
+    assertEq(white.mark, 'rgb(26, 36, 51)', 'SP mark is ink-black outside, white letters inside');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('demo CSV: a real reporting pyramid (CEO → C-Suite → SVP → VP → Director)', async () => {
+    const demo = fs.readFileSync(path.join(ROOT, 'succession_demo.csv'), 'utf8');
+    await loadBase(page, demo);
+    const d = await page.evaluate(() => {
+      const chain = id => { const out = []; let r = __APP__.roles.find(x => x.id === id); while (r && r.managerRoleId) { out.push(r.managerRoleId); r = __APP__.roles.find(x => x.id === r.managerRoleId); } return out; };
+      return {
+        roles: __APP__.roles.length, people: __APP__.people.length, succ: __APP__.successors.length,
+        rules: __APP__.rules.length, boards: __APP__.boards.filter(b => !['MASTER','ALL','PEOPLE','INSIGHTS','RULES','HISTORY'].includes(b.id)).length,
+        vpChain: chain('R-VP-SALES'), dirChain: chain('R-DIR-OPS'),
+        dashed: __APP__.roles.filter(r => !r.managerRoleId).map(r => r.id).sort(),
+        vacant: __APP__.roles.filter(r => !r.incumbentPersonId).length,
+        rt: __APP__.toCSV() === (__APP__.loadCSV(__APP__.toCSV()), __APP__.toCSV()),
+      };
+    });
+    assertEq(d.roles, 10, '10 roles'); assertEq(d.people, 12, '12 people'); assertEq(d.succ, 10, '10 slate rows');
+    assertEq(d.rules, 1, 'one demo rule'); assertEq(d.boards, 2, 'two board tabs');
+    assertEq(d.vpChain.join('>'), 'R-SVP-SALES>R-CRO>R-CEO', 'VP Sales reports up through SVP and CRO to the CEO');
+    assertEq(d.dirChain.join('>'), 'R-SVP-OPS>R-COO>R-CEO', 'Director of Ops reports up through SVP Ops and the COO');
+    assertEq(d.dashed.join(','), 'R-CEO,R-DIR-SALES', 'only the CEO and the demo dashed role lack Reports To');
+    assertEq(d.vacant, 2, 'two vacancies to demo (CRO + Director of Ops)');
+    assert(d.rt, 'demo round-trips byte-stable');
   });
 
   /* ===================================================================

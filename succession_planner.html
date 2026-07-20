@@ -332,6 +332,23 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bot
 .extra-fields{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-top:14px}
 .extra-fields .grid{margin-top:8px}
 /* ---------- appearance: color themes ---------- */
+/* Clean White (default): white header, ink SP mark */
+html[data-theme="default"] .brand-mark{background:#1a2433;color:#fff}
+/* color themes paint the app bar and its trims */
+html[data-theme]:not([data-theme="default"]) .appbar{background:linear-gradient(180deg,var(--primary) 0%,var(--primary-700) 100%);border-bottom:1px solid var(--primary-700)}
+html[data-theme]:not([data-theme="default"]) .brand-mark{background:#fff;color:var(--primary)}
+html[data-theme]:not([data-theme="default"]) .brand-name{color:#fff}
+html[data-theme]:not([data-theme="default"]) .brand-sub{color:rgba(255,255,255,.72)}
+html[data-theme]:not([data-theme="default"]) .file-status{color:rgba(255,255,255,.85)}
+html[data-theme]:not([data-theme="default"]) .file-chip{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.30);color:#fff}
+html[data-theme]:not([data-theme="default"]) .appbar .btn-quiet{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.32);color:#fff}
+html[data-theme]:not([data-theme="default"]) .appbar .btn-quiet:hover{background:rgba(255,255,255,.24)}
+html[data-theme]:not([data-theme="default"]) .appbar .btn-primary{background:#fff;color:var(--primary);border-color:#fff}
+html[data-theme]:not([data-theme="default"]) .appbar .btn-primary:hover{background:rgba(255,255,255,.9)}
+html[data-theme]:not([data-theme="default"]) .appbar .btn-green{background:rgba(255,255,255,.95);color:var(--green);border-color:transparent}
+html[data-theme]:not([data-theme="default"]) .dirty-dot{background:#ffd35c}
+html[data-theme]:not([data-theme="default"]) .appbar .menu{color:var(--ink)}
+html[data-theme]:not([data-theme="default"]) .appbar .tabs{background:var(--surface)}
 html[data-theme="forest"]{--primary:#147a41;--primary-700:#0f5e33;--primary-50:#e9f6ef;--primary-100:#cdeadb}
 html[data-theme="plum"]{--primary:#6d28d9;--primary-700:#5b21b6;--primary-50:#f3eefc;--primary-100:#e4d9f7}
 html[data-theme="sunset"]{--primary:#c2570b;--primary-700:#9a4508;--primary-50:#fdf1e7;--primary-100:#f9ddc4}
@@ -504,7 +521,7 @@ const PIECE_SETS={
   champions:{name:'Champions',king:'🏆',ranks:[['🥇','Queen'],['🥈','Rook'],['🥉','Bishop'],['🏅','Knight'],['⚽','Pawn']]},
 };
 const APPEARANCE_KEY='succession_planner_appearance_v1';
-let appearance={theme:'classic',pieces:'classic',board:'classic'};
+let appearance={theme:'default',pieces:'classic',board:'classic'};
 try{const a=JSON.parse(localStorage.getItem(APPEARANCE_KEY)||'{}');if(a&&typeof a==='object')appearance={...appearance,...a}}catch(e){}
 function applyAppearance(){
   document.documentElement.dataset.theme=appearance.theme||'classic';
@@ -1108,11 +1125,12 @@ function evaluateRules(s){
   rules.filter(x=>x.enabled).forEach(rule=>{
     let hit=false;
     if(rule.type==='BLOCK'){
-      const old=currentRoleForPerson(s.personId),op=rule.operator||'cannot move to target role';
-      const persons=String(rule.personId||'').split('|').filter(Boolean); // one or many blocked people
-      const personMatches=!persons.length||persons.includes(s.personId);
-      const targets=String(rule.targetRoleId||'').split('|').filter(Boolean); // one or many target roles
-      hit=op==='cannot change role'?(personMatches&&old&&old.id!==s.roleId):(personMatches&&targets.includes(s.roleId));
+      const old=currentRoleForPerson(s.personId);
+      // one rule can hold several person(s)->role(s) pairings; any match blocks
+      hit=blockEntriesOf(rule).some(en=>{
+        const personMatches=!en.p.length||en.p.includes(s.personId);
+        return en.op==='cannot change role'?(personMatches&&old&&old.id!==s.roleId):(personMatches&&en.t.includes(s.roleId));
+      });
     }else if(rule.type==='FIELD_RULE'){
       // eligibility rule: candidates who meet EVERY requirement may move;
       // the rule fires on anyone who fails at least one.
@@ -1596,11 +1614,12 @@ function renderPeople(){
 function ruleSummary(r){
   const roleNames=ids=>{const names=ids.map(id=>role(id)?.title||id);return names.slice(0,3).join(', ')+(names.length>3?` +${names.length-3} more`:'')};
   if(r.type==='BLOCK'){
-    const pids=String(r.personId||'').split('|').filter(Boolean);
-    const names=pids.map(id=>personName(id,id));
+    const entries=blockEntriesOf(r);
+    const first=entries[0]||{p:[],op:'',t:[]};
+    const names=first.p.map(id=>personName(id,id));
     const who=names.length?names.slice(0,3).join(', ')+(names.length>3?` +${names.length-3} more`:''):'Any person';
-    const targets=String(r.targetRoleId||'').split('|').filter(Boolean);
-    return r.operator==='cannot change role'?`${who} cannot change role`:`${who} cannot move to ${targets.length?roleNames(targets):'(no target role set)'}`;
+    const base=first.op==='cannot change role'?`${who} cannot change role`:`${who} cannot move to ${first.t.length?roleNames(first.t):'(no target role set)'}`;
+    return base+(entries.length>1?` (+${entries.length-1} more block${entries.length>2?'s':''} in this rule)`:'');
   }
   if(r.type==='AUTO_BACKFILL'){
     const cfg=autoRuleConfig(r);
@@ -1869,6 +1888,7 @@ function renamePersonRefs(oldId,newId){
   rules.forEach(r=>{
     if(String(r.personId||'').includes('|'))r.personId=String(r.personId).split('|').map(x=>x===oldId?newId:x).join('|');
     else if(r.personId===oldId)r.personId=newId;
+    if(r.type==='BLOCK'&&r.value){const arr=safeJSON(r.value,null);if(Array.isArray(arr)&&arr[0]&&Array.isArray(arr[0].p)){let hit=false;arr.forEach(e=>{e.p=(e.p||[]).map(x=>{if(x===oldId){hit=true;return newId}return x})});if(hit)r.value=JSON.stringify(arr)}}
     if(r.altPersonId===oldId)r.altPersonId=newId;
     if(r.type==='AUTO_BACKFILL'){const cfg=safeJSON(r.value,null);if(cfg&&Array.isArray(cfg.customMappings)){let hit=false;cfg.customMappings.forEach(m=>{if(m.personId===oldId){m.personId=newId;hit=true}});if(hit)r.value=JSON.stringify(cfg)}}
   });
@@ -1956,6 +1976,7 @@ function renameRoleRefs(oldId,newId){
   roles.forEach(r=>{if(r.managerRoleId===oldId)r.managerRoleId=newId});
   rules.forEach(r=>{
     if(r.targetRoleId&&String(r.targetRoleId).split('|').includes(oldId))r.targetRoleId=String(r.targetRoleId).split('|').map(x=>x===oldId?newId:x).join('|');
+    if(r.type==='BLOCK'&&r.value){const arr=safeJSON(r.value,null);if(Array.isArray(arr)&&arr[0]&&Array.isArray(arr[0].p)){let hit=false;arr.forEach(e=>{e.t=(e.t||[]).map(x=>{if(x===oldId){hit=true;return newId}return x})});if(hit)r.value=JSON.stringify(arr)}}
     if(r.type==='AUTO_BACKFILL'){const cfg=safeJSON(r.value,null);if(cfg&&Array.isArray(cfg.customMappings)){let hit=false;cfg.customMappings.forEach(m=>{if(m.roleId===oldId){m.roleId=newId;hit=true}});if(hit)r.value=JSON.stringify(cfg)}}
   });
   if(importBaseline){importBaseline.successors.forEach(s=>{if(s.roleId===oldId)s.roleId=newId});importBaseline.roles.forEach(r=>{if(r.id===oldId)r.id=newId;if(r.managerRoleId===oldId)r.managerRoleId=newId})}
@@ -2128,9 +2149,21 @@ function updateRuleTypeUI(){
   if(type==='BLOCK')el('blockSection')?.classList.remove('hidden');
   if(type==='FIELD_RULE')el('fieldSection')?.classList.remove('hidden');
   if(type==='AUTO_BACKFILL')el('autoSection')?.classList.remove('hidden');
-  updateBlockTargetUI();updateAutoCustomUI();
+  updateAutoCustomUI();
 }
-function updateBlockTargetUI(){const op=v('ruleBlockOperator');el('targetRoleBox')?.classList.toggle('hidden',op==='cannot change role')}
+function blockEntriesOf(rule){
+  const arr=safeJSON(rule.value,null);
+  if(Array.isArray(arr)&&arr.length&&arr[0]&&Array.isArray(arr[0].p))return arr.map(e=>({p:e.p||[],op:e.op||'cannot move to target role',t:e.t||[]}));
+  return [{p:String(rule.personId||'').split('|').filter(Boolean),op:rule.operator||'cannot move to target role',t:String(rule.targetRoleId||'').split('|').filter(Boolean)}];
+}
+function blockRowHtml(entry){
+  return `<div class="block-row" style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px"><div class="grid">
+    <div><label>Person(s)</label>${peopleCheckboxPicker('blockPersonCheck',entry.p)}</div>
+    <div><label>Operator</label><select class="blockOperator"><option value="cannot move to target role" ${entry.op!=='cannot change role'?'selected':''}>cannot move to target role</option><option value="cannot change role" ${entry.op==='cannot change role'?'selected':''}>cannot change role</option></select>
+      <div style="margin-top:8px"><button type="button" class="btn btn-danger btn-sm" data-action="removeBlockRow">Remove this block</button></div></div>
+    <div class="blockTargetBox ${entry.op==='cannot change role'?'hidden':''}"><label>Target Role(s)</label>${rolesCheckboxPicker('blockTargetCheck',entry.t)}</div>
+  </div></div>`;
+}
 function updateAutoCustomUI(){const val=v('autoTypeSelect');el('customAutoBox')?.classList.toggle('hidden',val!=='Custom')}
 function openRuleDrawer(id=''){
   const r=id?rules.find(x=>x.id===id):{id:uid('RULE'),name:'',type:'FIELD_RULE',scope:'Candidate',field:'readiness',operator:'equals',value:'Ready Now',personId:'',targetRoleId:'',severity:'Block',message:'',enabled:true};
@@ -2149,11 +2182,10 @@ function openRuleDrawer(id=''){
     <div><label>Enabled</label><select id="ruleEnabled"><option ${r.enabled?'selected':''}>true</option><option ${!r.enabled?'selected':''}>false</option></select></div>
     <div class="full"><label>Callout Message</label><textarea id="ruleMsg" placeholder="Shown when the rule fires">${esc(r.message)}</textarea></div>
   </div>
-  <div id="blockSection" class="rule-section"><h3>Block Rule</h3><div class="hint" style="margin-bottom:8px">Stop people from being approved or auto-moved. Pick one person or several, and one target role or several — one rule covers them all.</div><div class="grid">
-    <div><label>Person(s)</label>${peopleCheckboxPicker('blockPersonCheck',String(r.personId||'').split('|').filter(Boolean))}</div>
-    <div><label>Operator</label><select id="ruleBlockOperator"><option value="cannot move to target role" ${r.operator!=='cannot change role'?'selected':''}>cannot move to target role</option><option value="cannot change role" ${r.operator==='cannot change role'?'selected':''}>cannot change role</option></select></div>
-    <div id="targetRoleBox"><label>Target Role(s)</label>${rolesCheckboxPicker('blockTargetCheck',String(r.targetRoleId||'').split('|').filter(Boolean))}</div>
-  </div></div>
+  <div id="blockSection" class="rule-section"><h3>Block Rule</h3><div class="hint" style="margin-bottom:8px">Stop people from being approved or auto-moved. Each entry pairs its own people with its own target roles — <b>+ Add Another Block</b> keeps different pairings inside this one rule.</div>
+    <div id="blockRows">${blockEntriesOf(r).map(blockRowHtml).join('')}</div>
+    <button type="button" class="btn btn-green btn-sm" data-action="addBlockRow">+ Add Another Block</button>
+  </div>
   <div id="fieldSection" class="rule-section"><h3>Eligibility Requirements</h3><div class="hint" style="margin-bottom:8px">A candidate must meet <b>all</b> of these to be approved or auto-moved — anyone who doesn&rsquo;t is stopped (severity Block) or flagged (Needs Review). Equal / not equal use a dropdown, contains matches partial text, list means any of the checked values. Added values are saved in the CSV for reuse.</div>
     <div id="conditionRows">${conds.map(c=>conditionRowHtml(c)).join('')}</div>
     <button type="button" class="btn btn-green btn-sm" data-action="addConditionRow">+ Add Requirement</button>
@@ -2180,12 +2212,18 @@ function saveRule(oldId=''){
   if(!r.message)r.message=type==='FIELD_RULE'?`Candidate does not meet the eligibility requirements (${r.name}).`:`${r.name} triggered.`;
   if(type==='BLOCK'){
     r.severity='Block';
-    r.operator=v('ruleBlockOperator')||'cannot move to target role';
-    r.personId=checkedValues('blockPersonCheck').join('|');
-    r.targetRoleId=checkedValues('blockTargetCheck').join('|');
-    if(!r.personId)missing.push('At least one person');
-    if(r.operator==='cannot move to target role'&&!r.targetRoleId)missing.push('At least one target role');
-    if(r.operator==='cannot change role')r.targetRoleId='';
+    const entries=[...document.querySelectorAll('#blockRows .block-row')].map(row=>({
+      p:[...row.querySelectorAll('.blockPersonCheck')].filter(c=>c.checked).map(c=>c.value),
+      op:row.querySelector('.blockOperator')?.value||'cannot move to target role',
+      t:[...row.querySelectorAll('.blockTargetCheck')].filter(c=>c.checked).map(c=>c.value),
+    })).filter(e=>e.p.length||e.t.length); // fully empty rows are ignored
+    entries.forEach(e=>{if(e.op==='cannot change role')e.t=[]});
+    if(!entries.length||entries.some(e=>!e.p.length))missing.push('At least one person in every block entry');
+    if(entries.some(e=>e.op==='cannot move to target role'&&!e.t.length))missing.push('A target role in every "cannot move to" entry');
+    r.personId=entries[0]?entries[0].p.join('|'):'';
+    r.operator=entries[0]?entries[0].op:'cannot move to target role';
+    r.targetRoleId=entries[0]?entries[0].t.join('|'):'';
+    r.value=entries.length>1?JSON.stringify(entries):'';
   }
   if(type==='FIELD_RULE'){
     const conds=[...document.querySelectorAll('#conditionRows .condition-row')].map(row=>({field:row.querySelector('.condField')?.value||'',operator:row.querySelector('.condOperator')?.value||'',value:getConditionValues(row)})).filter(c=>c.field&&c.operator&&c.value);
@@ -2578,6 +2616,12 @@ const ACTIONS={
   drawerRemoveSucc:d=>{removeSuccessor(d.succId);if(role(d.roleId))openRoleDrawer(d.roleId)},
   personSlateRemove:d=>{removeSuccessor(d.succId);if(person(d.personId))openPersonDrawer(d.personId)},
   addConditionRow:()=>addConditionRow(),
+  addBlockRow:()=>{el('blockRows')?.insertAdjacentHTML('beforeend',blockRowHtml({p:[],op:'cannot move to target role',t:[]}))},
+  removeBlockRow:(d,elm)=>{
+    const rows=document.querySelectorAll('#blockRows .block-row');
+    if(rows.length<=1){notice('WARN','A block rule needs at least one entry — delete the whole rule instead.');return}
+    elm.closest('.block-row')?.remove();
+  },
   addCheckboxValue:(d,elm)=>addRuleCheckboxValue(elm),
   addCustomMapRow:()=>addCustomMapRow(),
   addBoardRow:()=>addBoardRow(),
@@ -2647,7 +2691,7 @@ document.addEventListener('change',e=>{
   }
   if(t.id==='chessRoleSwitch')return chessGoTo(t.value);
   if(t.id==='ruleType')return updateRuleTypeUI();
-  if(t.id==='ruleBlockOperator')return updateBlockTargetUI();
+  if(t.classList.contains('blockOperator'))return t.closest('.block-row')?.querySelector('.blockTargetBox')?.classList.toggle('hidden',t.value==='cannot change role');
   if(t.id==='autoTypeSelect')return updateAutoCustomUI();
 });
 let searchTimer=null;
@@ -3836,7 +3880,7 @@ Object.assign(ACTIONS,{
 /* =====================================================================
    Appearance — personal, saved in this browser only, never in the CSV
    ===================================================================== */
-const APP_THEMES=[['classic','Classic Blue','#0b66c2'],['forest','Forest','#147a41'],['plum','Royal Plum','#6d28d9'],['sunset','Sunset','#c2570b'],['ocean','Ocean','#0e7490']];
+const APP_THEMES=[['default','Clean White','#1a2433'],['classic','Classic Blue','#0b66c2'],['forest','Forest','#147a41'],['plum','Royal Plum','#6d28d9'],['sunset','Sunset','#c2570b'],['ocean','Ocean','#0e7490']];
 const APP_BOARDS=[['classic','Classic','#eef1f6','#ffffff'],['wood','Wood','#dfc094','#f7ead2'],['felt','Card Table','#c9e7d4','#eaf6ef'],['marble','Marble','#d8dde6','#f4f6fa']];
 function openAppearanceDrawer(){
   trackDrawer('appearance',()=>openAppearanceDrawer());

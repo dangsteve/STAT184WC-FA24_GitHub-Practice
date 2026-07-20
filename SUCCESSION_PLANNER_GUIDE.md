@@ -122,8 +122,9 @@ Three kinds, editable in plain language:
   The rule list spells the scope out in plain words.
 - **Block a person's move** — **one person or several at once** (checkbox
   picker with a filter box) cannot move into the **target roles you tick**
-  (one or many), or cannot change role at all. One rule covers the whole
-  list — no need to save a separate rule per person.
+  (one or many), or cannot change role at all. Need different pairings —
+  these people barred from this role, those people from that one? Press
+  **+ Add Another Block** and keep every pairing inside the same rule.
 - **Auto backfill** — when a role becomes vacant, pull in the top-ranked slate
   candidate of a chosen type, or use an explicit role → person chart.
 
@@ -219,8 +220,10 @@ CSV and become available everywhere, including rule builders and filters.
 
 ## Appearance (the 🎨 button)
 
-A little fun, zero risk: pick a **color theme** (Classic Blue, Forest, Royal
-Plum, Sunset, Ocean), one of **eleven chess piece sets** (Classic, Royal Court,
+A little fun, zero risk: pick a **color theme** — **Clean White** (the
+default: white header, black SP mark) or Classic Blue, Forest, Royal Plum,
+Sunset, Ocean, which paint the whole top bar in the theme color — one of
+**eleven chess piece sets** (Classic, Royal Court,
 Animal Kingdom, Woodland, Holiday 🎅, Galaxy 🪐, Robot Lab 🤖, Fantasy Quest 🧙,
 Dinosaurs 🦖, Deep Sea 🔱, Champions 🏆), and a **board style** (Classic, Wood,
 Card Table, Marble). Choices apply instantly, are saved on your computer only,
