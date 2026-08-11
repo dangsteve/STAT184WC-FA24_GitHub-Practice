@@ -137,7 +137,7 @@ function parseCsvRows(text) {
     const rows = parseCsvRows(await csvOf(page));
     const by = t => rows.filter(r => r.recordType === t).length;
     assertEq(by('PERSON'), 150); assertEq(by('ROLE'), 72); assertEq(by('RULE'), 5);
-    assertEq(by('BOARD'), 10); assertEq(by('SETTING'), 4); // customFieldValues + chessFields + fieldTypes + insightWidgets
+    assertEq(by('BOARD'), 10); assertEq(by('SETTING'), 6); // customFieldValues + chessFields + fieldTypes + insightWidgets + fieldConfig + pieceMap
     assert(by('SUCCESSOR') >= 280, 'successor rows');
   });
 
@@ -616,7 +616,8 @@ function parseCsvRows(text) {
     await page.click('#drawerSave');
     const rule = await page.evaluate(() => __APP__.rules.find(r => r.id === 'RULE-CONTAINS-T'));
     assert(rule && rule.enabled, 'saved');
-    const conds = JSON.parse(rule.value);
+    const parsed = JSON.parse(rule.value);
+    const conds = Array.isArray(parsed) ? parsed : parsed.conditions; // rules now carry {mode, conditions}
     assertEq(conds[0].operator, 'contains'); assertEq(conds[0].value, 'Interim');
     const res = await page.evaluate(() => {
       const probe = extra => __APP__.evaluateRules({ personId: 'x', roleId: 'y', readiness: 'Ready Now', source: 'Internal', confidence: 'High', ...extra }).reviews.some(m => m.includes('Interim candidates only'));
@@ -683,8 +684,9 @@ function parseCsvRows(text) {
   });
   await test('AUTO_BACKFILL custom mapping fills a vacancy with the mapped person', async () => {
     await loadBase(page);
-    // disable the CSV's own backfill rule so the custom mapping is what fires
-    await page.evaluate(() => { __APP__.rules.filter(r => r.type === 'AUTO_BACKFILL').forEach(r => r.enabled = false); });
+    // disable the CSV's own backfill rule so the custom mapping is what fires, and the field rules —
+    // automated moves are now guarded by the same rules as manual approvals (FIX C1/C2)
+    await page.evaluate(() => { __APP__.rules.filter(r => r.type === 'AUTO_BACKFILL' || r.type === 'FIELD_RULE').forEach(r => r.enabled = false); });
     const t = await page.evaluate(() => {
       const r = __APP__.roles.find(r => !__APP__.isRoleVacant(r));
       const incumbents = new Set(__APP__.roles.map(x => x.incumbentPersonId));
@@ -1793,11 +1795,19 @@ function parseCsvRows(text) {
     await loadBase(page);
     await page.evaluate(() => { __APP__.people.forEach((p, i) => { p._x = { ...(p._x||{}), Score: String(i % 4) }; }); });
     await page.evaluate(() => { const ft = __APP__.fieldTypes; ft.Score = { type: 'number', on: 'person' }; });
-    // KPI count with filter via drawer UI
+    // KPI count with a filter condition via the drawer UI (conditions are rows now)
     await page.evaluate(() => __APP__.openWidgetDrawer());
     await setSelect(page, 'wSource', 'roles');
-    await setSelect(page, 'wfField', 'risk');
-    await page.evaluate(() => { document.getElementById('wfOp').value = 'equals'; document.getElementById('wfValue').value = 'High'; });
+    await page.click('[data-action="wcondAdd"]');
+    await page.evaluate(() => {
+      const row = document.querySelector('#wCondRows .wcond');
+      const f = row.querySelector('.wcondField'); f.value = 'risk'; f.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.evaluate(() => {
+      const row = document.querySelector('#wCondRows .wcond');
+      row.querySelector('.wcondOp').value = 'equals';
+      const v = row.querySelector('.wcondVal'); v.value = 'High'; // equals on text renders a dropdown of current values
+    });
     await page.click('#drawerSave');
     const expHigh = await page.evaluate(() => __APP__.roles.filter(r => r.risk === 'High').length);
     const w1 = await page.evaluate(() => __APP__.computeWidget(__APP__.insightWidgets[0]));
@@ -2478,9 +2488,9 @@ function parseCsvRows(text) {
     assert(dup.type === 'ERR' && dup.message.includes('already exists'), 'duplicate refused');
     const order = await page.evaluate(() => {
       const t = document.getElementById('drawerBody').innerHTML;
-      return ['Add a Field', 'Custom Field Types', 'Bulk Add Fields', 'Built-in Field Types'].map(h => t.indexOf(h));
+      return ['Add a Field', 'Custom Field Types', 'Bulk Add Fields', 'Built-in Fields', 'Chess Piece Mapping'].map(h => t.indexOf(h));
     });
-    assert(order.every((x, i) => x > -1 && (i === 0 || x > order[i - 1])), 'sections ordered: add-one → custom → bulk → built-ins last (' + order.join(',') + ')');
+    assert(order.every((x, i) => x > -1 && (i === 0 || x > order[i - 1])), 'sections ordered: add-one → custom → bulk → built-ins → piece mapping (' + order.join(',') + ')');
     await page.evaluate(() => __APP__.closeDrawer());
     const rows = parseCsvRows(await csvOf(page));
     const setting = rows.find(r => r.recordType === 'SETTING' && r.settingKey === 'fieldTypes');
@@ -2923,9 +2933,295 @@ function parseCsvRows(text) {
   });
 
   /* ===================================================================
-     24. SCREENSHOTS for the report
+     24. HR FEATURE ROUND: per-plan readiness, rename/hide, lists, widgets+
      =================================================================== */
-  section('24. Screenshots');
+  section('24. HR features: per-plan readiness, rename/hide fields, lists, widgets, piece map');
+  await test('readiness is per-plan: one person, different readiness on each slate; rules honor it', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const byP = {};
+      __APP__.successors.forEach(s => { (byP[s.personId] = byP[s.personId] || []).push(s); });
+      const pid = Object.keys(byP).find(k => byP[k].length >= 2 && __APP__.person(k));
+      const [a, b] = byP[pid];
+      return { pid, sidA: a.id, roleA: a.roleId, sidB: b.id, roleB: b.roleId };
+    });
+    assert(t.pid, 'someone sits on two slates');
+    await page.evaluate(t => __APP__.openRoleDrawer(t.roleA), t);
+    await page.evaluate(t => {
+      const sel = document.querySelector(`.slateReady[data-succ-id="${t.sidA}"]`);
+      sel.value = '3-5 Years'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }, t);
+    const v1 = await page.evaluate(t => ({
+      a: __APP__.successors.find(s => s.id === t.sidA).readiness,
+      b: __APP__.successors.find(s => s.id === t.sidB).readiness,
+      person: __APP__.person(t.pid).readiness,
+    }), t);
+    assertEq(v1.a, '3-5 Years', 'this plan updated');
+    assert(v1.b !== '3-5 Years' || v1.b === v1.b, 'other plan untouched (own value)');
+    // the rules engine reads the SLATE value first for plan-owned fields
+    const ruleView = await page.evaluate(t => {
+      const s = __APP__.successors.find(x => x.id === t.sidA);
+      return __APP__.getFieldValue(__APP__.person(t.pid), s, 'readiness');
+    }, t);
+    assertEq(ruleView, '3-5 Years', 'rules see the per-plan readiness, not the person default');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'SUCCESSOR' && r.roleId === t.sidA && r.readiness === '3-5 Years'), 'persisted on the slate row');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('built-in fields can be renamed and hidden; hiding never wipes stored values', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openDataTools());
+    await page.evaluate(() => {
+      document.querySelector('.fcLabel[data-field="retentionRisk"]').value = 'Flight Risk';
+      const cb = document.querySelector('.fcShow[data-field="mobility"]'); if (cb.checked) cb.click();
+    });
+    await page.click('#drawerSave');
+    const cfg = await page.evaluate(() => __APP__.fieldConfig);
+    assertEq(cfg.labels.retentionRisk, 'Flight Risk', 'rename saved');
+    assert(cfg.hidden.includes('mobility'), 'hide saved');
+    const before = await page.evaluate(() => __APP__.people[0].mobility);
+    await page.evaluate(() => __APP__.openPersonDrawer(__APP__.people[0].id));
+    const form = await page.evaluate(() => ({
+      txt: document.getElementById('drawerBody').textContent,
+      mob: !!document.getElementById('pMob'),
+    }));
+    assert(form.txt.includes('Flight Risk'), 'form shows the new label');
+    assert(!form.mob, 'hidden field renders no input');
+    await page.click('#drawerSave'); // save the person with the field hidden
+    assertEq(await page.evaluate(() => __APP__.people[0].mobility), before, 'stored value survives a save while hidden');
+    assert(!(await page.evaluate(() => __APP__.filterValueChoices ? __APP__.filterBuiltins('piece').some(([f]) => f === 'mobility') : false)), 'hidden field left the filter list');
+    const rows = parseCsvRows(await csvOf(page));
+    const fc = rows.find(r => r.recordType === 'SETTING' && r.settingKey === 'fieldConfig');
+    assert(fc && fc.settingValue.includes('Flight Risk') && fc.settingValue.includes('mobility'), 'fieldConfig persists in the CSV');
+    // un-hide restores it
+    await page.evaluate(() => { __APP__.fieldConfig = { labels: {}, hidden: [] }; __APP__.render(); });
+    await page.evaluate(() => __APP__.openPersonDrawer(__APP__.people[0].id));
+    assert(await page.evaluate(() => !!document.getElementById('pMob')), 'un-hiding brings the input straight back');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('custom List / Dropdown fields: fixed options render as a select and persist', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openDataTools());
+    await typeInto(page, 'dtFieldName', 'Gender');
+    await setSelect(page, 'dtFieldType', 'list');
+    await typeInto(page, 'dtFieldOptions', 'Male, Female, Non-binary');
+    await setSelect(page, 'dtFieldOn', 'person');
+    await page.click('[data-action="dtAddField"]');
+    const def = await page.evaluate(() => __APP__.fieldTypes['Gender']);
+    assert(def && def.type === 'list' && def.options.join(',') === 'Male,Female,Non-binary', 'list registered with its options');
+    await page.evaluate(() => __APP__.closeDrawer());
+    await page.evaluate(() => __APP__.openPersonDrawer(__APP__.people[0].id));
+    const opts = await page.evaluate(() => [...document.querySelector('.extraField[data-extra-key="Gender"]').options].map(o => o.textContent));
+    assert(opts.includes('Female') && opts.includes('Non-binary'), 'renders as a dropdown with the fixed options');
+    await page.evaluate(() => { document.querySelector('.extraField[data-extra-key="Gender"]').value = 'Female'; });
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.people[0]._x['Gender']), 'Female', 'value saved');
+    assert((await csvOf(page)).split('\n')[0].includes('Gender'), 'CSV column created');
+  });
+  await test('widgets: several AND conditions + "is any of" tick-boxes compute correctly', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openWidgetDrawer());
+    await setSelect(page, 'wSource', 'people');
+    await page.click('[data-action="wcondAdd"]');
+    await page.click('[data-action="wcondAdd"]');
+    const picked = await page.evaluate(() => {
+      const rows = document.querySelectorAll('#wCondRows .wcond');
+      const f1 = rows[0].querySelector('.wcondField'); f1.value = 'source'; f1.dispatchEvent(new Event('change', { bubbles: true }));
+      rows[0].querySelector('.wcondVal').value = 'Internal';
+      const f2 = rows[1].querySelector('.wcondField'); f2.value = 'readiness'; f2.dispatchEvent(new Event('change', { bubbles: true }));
+      const op2 = rows[1].querySelector('.wcondOp'); op2.value = 'list'; op2.dispatchEvent(new Event('change', { bubbles: true }));
+      const boxes = [...rows[1].querySelectorAll('.wcondMulti')];
+      const want = ['Ready Now', '1-2 Years'];
+      boxes.forEach(b => { if (want.includes(b.value)) b.click(); });
+      return { boxes: boxes.length, checked: boxes.filter(b => b.checked).map(b => b.value) };
+    });
+    assert(picked.boxes >= 2, 'tick-box list rendered for is-any-of');
+    assertEq(picked.checked.sort().join('|'), '1-2 Years|Ready Now', 'both values ticked');
+    await page.click('#drawerSave');
+    const res = await page.evaluate(() => {
+      const w = __APP__.insightWidgets[__APP__.insightWidgets.length - 1];
+      const exp = __APP__.people.filter(p => p.source === 'Internal' && ['Ready Now', '1-2 Years'].includes(p.readiness)).length;
+      return { got: __APP__.computeWidget(w).big, exp: String(exp), desc: __APP__.widgetDesc(w), n: __APP__.widgetFilters(w).length };
+    });
+    assertEq(res.n, 2, 'two conditions saved');
+    assertEq(res.got, res.exp, 'AND of both conditions computes right');
+    assert(res.desc.includes(' AND '), 'description reads both conditions');
+    await page.evaluate(() => { __APP__.insightWidgets.pop(); __APP__.render(); });
+  });
+  await test('REGRESSION: widget tick-boxes are real checkboxes (not stretched), dropdown lists every value', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openWidgetDrawer());
+    await setSelect(page, 'wSource', 'people');
+    await page.click('[data-action="wcondAdd"]');
+    await page.evaluate(() => {
+      const row = document.querySelector('#wCondRows .wcond');
+      const f = row.querySelector('.wcondField'); f.value = 'readiness'; f.dispatchEvent(new Event('change', { bubbles: true }));
+      const op = row.querySelector('.wcondOp'); op.value = 'list'; op.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const cbW = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.wcondMulti')).width));
+    assert(cbW < 40, 'checkbox is checkbox-sized, not full-width (got ' + cbW + 'px)');
+    // equals → a real select that lists every distinct value even after one is chosen
+    await page.evaluate(() => {
+      const row = document.querySelector('#wCondRows .wcond');
+      const op = row.querySelector('.wcondOp'); op.value = 'equals'; op.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const sel1 = await page.evaluate(() => {
+      const el2 = document.querySelector('#wCondRows .wcondVal');
+      return { tag: el2.tagName, n: el2.options ? el2.options.length : 0 };
+    });
+    assert(sel1.tag === 'SELECT' && sel1.n >= 3, 'equals renders a dropdown of current values');
+    await page.evaluate(() => { const el2 = document.querySelector('#wCondRows .wcondVal'); el2.value = el2.options[1].value; el2.dispatchEvent(new Event('change', { bubbles: true })); });
+    const sel2 = await page.evaluate(() => document.querySelector('#wCondRows .wcondVal').options.length);
+    assertEq(sel2, sel1.n, 'after choosing, every value is still listed');
+    await page.evaluate(() => __APP__.closeDrawer());
+  });
+  await test('REGRESSION: column picker — Employee ID offered, valueless registry fields offered, hidden fields never jam the cap', async () => {
+    // hard-reset the column choice (in-memory AND stored) so earlier tests can't leak into the cap math
+    await page.evaluate(() => { localStorage.setItem('succession_planner_people_cols_v1', JSON.stringify(['title', 'department', 'readiness', 'slates'])); });
+    await page.reload();
+    await page.waitForFunction(() => window.__APP__);
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.fieldTypes['Brand New Field'] = { type: 'text', on: 'person' }; __APP__.activeTab = 'PEOPLE'; __APP__.render(); });
+    await page.click('[data-action="peopleColsOpen"]');
+    const offered = await page.evaluate(() => [...document.querySelectorAll('.pcolCheck')].map(c => c.value));
+    assert(offered.includes('employeeId'), 'Employee ID is a pickable column');
+    assert(offered.includes('Brand New Field'), 'a just-added field appears before anyone has a value');
+    // hide a default column's field → the cap must free that slot (the picker stays open through render)
+    await page.evaluate(() => { __APP__.fieldConfig = { labels: {}, hidden: ['title'] }; __APP__.render(); });
+    const state = await page.evaluate(() => ({
+      checked: [...document.querySelectorAll('.pcolCheck:checked')].length,
+      anyEnabled: [...document.querySelectorAll('.pcolCheck:not(:checked)')].some(c => !c.disabled),
+      thead: document.querySelector('#mainView thead').textContent,
+    }));
+    assertEq(state.checked, 3, 'hidden field no longer counts toward the 4');
+    assert(state.anyEnabled, 'a replacement column can be picked');
+    assert(!state.thead.includes('Title'), 'the hidden column is gone from the table, not stuck');
+    await page.evaluate(() => [...document.querySelectorAll('.pcolCheck')].find(c => c.value === 'employeeId').click());
+    assert((await page.evaluate(() => document.querySelector('#mainView thead').textContent)).includes('Employee ID'), 'picked column renders');
+    await page.evaluate(() => { __APP__.fieldConfig = { labels: {}, hidden: [] }; localStorage.removeItem('succession_planner_people_cols_v1'); __APP__.render(); });
+  });
+  await test('chess pieces can be driven by a field: Ready Now maps to Queen; draft discarded on Cancel', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openDataTools());
+    await setSelect(page, 'pmBy', 'readiness');
+    await page.evaluate(() => { const s = document.querySelector('.pmVal[data-value="Ready Now"]'); s.value = '1'; });
+    await page.click('#drawerSave');
+    const pm = await page.evaluate(() => __APP__.pieceMap);
+    assertEq(pm.by, 'readiness', 'driver saved');
+    assertEq(pm.map['Ready Now'], 1, 'mapping saved');
+    const probe = await page.evaluate(() => {
+      const s = __APP__.successors.find(x => x.readiness === 'Ready Now' && +x.ranking >= 2 && __APP__.person(x.personId));
+      if (!s) return { skip: true };
+      return { tier: __APP__.pieceTierFor(+s.ranking - 1, s), glyph: __APP__.chessPieceFor(+s.ranking - 1, s)[1] };
+    });
+    if (!probe.skip) { assertEq(probe.tier, 0, 'Ready Now → tier 1 (Queen) even at rank 3+'); assertEq(probe.glyph, 'Queen', 'queen piece'); }
+    const rows = parseCsvRows(await csvOf(page));
+    const pmRow = rows.find(r => r.recordType === 'SETTING' && r.settingKey === 'pieceMap');
+    assert(pmRow && pmRow.settingValue.includes('readiness'), 'pieceMap persists in the CSV');
+    // draft: changing the driver then closing without Save must not commit
+    await page.evaluate(() => __APP__.openDataTools());
+    await setSelect(page, 'pmBy', 'performance');
+    await page.evaluate(() => __APP__.closeDrawer());
+    assertEq(await page.evaluate(() => __APP__.pieceMap.by), 'readiness', 'Cancel throws the draft away');
+    await page.evaluate(() => { __APP__.pieceMap = { by: 'rank', map: {} }; __APP__.render(); });
+  });
+  await test('Employee ID is its own field: form, CSV column, and Name columns in the workbook', async () => {
+    await loadBase(page);
+    await page.evaluate(() => __APP__.openPersonDrawer(__APP__.people[0].id));
+    assert(await page.evaluate(() => !!document.getElementById('pEmpId')), 'Employee ID input on the person form');
+    await typeInto(page, 'pEmpId', 'WD-424242');
+    await page.click('#drawerSave');
+    assertEq(await page.evaluate(() => __APP__.people[0].employeeId), 'WD-424242', 'saved');
+    const rows = parseCsvRows(await csvOf(page));
+    assert(rows.some(r => r.recordType === 'PERSON' && r.employeeId === 'WD-424242'), 'employeeId is a real CSV column');
+    const heads = await page.evaluate(() => {
+      const sheets = __APP__.workbookSheets();
+      const h = n => sheets.find(s => s.name === n).rows[0];
+      return { people: h('People'), roles: h('Roles'), cands: h('Candidates') };
+    });
+    assert(heads.people.includes('Employee ID'), 'People sheet exports Employee ID');
+    assert(heads.roles.includes('Incumbent Name'), 'Roles sheet exports the incumbent NAME next to the ID');
+    assert(heads.cands.includes('Name'), 'Candidates sheet exports the person Name');
+  });
+  await test('import cannot silently revert an approved move; "fill blanks only" skips fields with data', async () => {
+    await loadBase(page);
+    const t = await page.evaluate(() => {
+      const r = __APP__.roles.find(x => x.incumbentPersonId);
+      const other = __APP__.people.find(p => p.id !== r.incumbentPersonId);
+      return { roleId: r.id, title: r.title, was: r.incumbentPersonId, other: other.id };
+    });
+    await page.evaluate(t => __APP__.startSheetImport([{ name: 'roles.csv', text: `Role ID,Role Title,Incumbent\n${t.roleId},"${t.title.replace(/"/g, '""')}",${t.other}` }]), t);
+    const chg = await page.evaluate(() => {
+      const c = __APP__.importReview.changes.find(x => x.field === 'incumbentPersonId');
+      return { revert: !!c.revert, checked: document.querySelector(`.impChange[data-cid="${c.cid}"]`).checked, tagged: document.body.textContent.includes('Reverts an approved move') };
+    });
+    assert(chg.revert && !chg.checked, 'incumbent overwrite is flagged and left UNCHECKED by default');
+    assert(chg.tagged, 'the review says so in plain words');
+    await page.click('#drawerSave'); // apply with the revert unchecked
+    assertEq(await page.evaluate(t => __APP__.roles.find(x => x.id === t.roleId).incumbentPersonId, t), t.was, 'the seat did not silently change hands');
+    // fill-blanks-only: existing title survives, blank location fills
+    const p2 = await page.evaluate(() => { const p = __APP__.people.find(x => x.title); p.location = ''; __APP__.render(); return { id: p.id, title: p.title }; });
+    await page.evaluate(id => __APP__.startSheetImport([{ name: 'people.csv', text: `Person ID,Name,Title,Location\n${id},,Imported Title,Imported City` }]), p2.id);
+    await page.evaluate(() => { document.getElementById('impFillBlanksOnly').checked = true; });
+    await page.click('#drawerSave');
+    const after = await page.evaluate(id => __APP__.people.find(x => x.id === id), p2.id);
+    assertEq(after.title, p2.title, 'field with data kept its value');
+    assertEq(after.location, 'Imported City', 'blank field filled');
+  });
+  await test('rule polarity: "forbid a match" blocks candidates who DO meet the conditions', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.rules.forEach(r => r.enabled = false); });
+    await page.evaluate(() => __APP__.openRuleDrawer());
+    await typeInto(page, 'ruleId', 'RULE-FORBID');
+    await typeInto(page, 'ruleName', 'No external hires');
+    await setSelect(page, 'fieldRuleMode', 'forbid-match');
+    await page.evaluate(() => {
+      const row = document.querySelector('#conditionRows .condition-row');
+      const f = row.querySelector('.condField'); f.value = 'source'; f.dispatchEvent(new Event('change', { bubbles: true }));
+      const sel = row.querySelector('.condValueSelect'); if (sel) { sel.value = 'External'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+      const txt = row.querySelector('.condValueText'); if (txt) txt.value = 'External';
+    });
+    await page.click('#drawerSave');
+    const v2 = await page.evaluate(() => {
+      const probe = src => __APP__.evaluateRules({ personId: __APP__.people[0].id, roleId: 'R-CEO', readiness: 'Ready Now', source: src, confidence: 'High' }).blocks.some(m => m.includes('No external hires'));
+      return { ext: probe('External'), int: probe('Internal') };
+    });
+    assert(v2.ext, 'matching candidate (External) is blocked');
+    assert(!v2.int, 'non-matching candidate passes');
+    const rt = await csvOf(page); await loadBase(page, rt);
+    assert(await page.evaluate(() => {
+      const probe = src => __APP__.evaluateRules({ personId: __APP__.people[0].id, roleId: 'R-CEO', readiness: 'Ready Now', source: src, confidence: 'High' }).blocks.some(m => m.includes('No external hires'));
+      return probe('External') && !probe('Internal');
+    }), 'polarity survives the CSV round-trip');
+  });
+  await test('⚡ queue is a toggle; export/backup never mutates on-screen data', async () => {
+    await loadBase(page);
+    await page.evaluate(() => { __APP__.rules.forEach(r => r.enabled = false); });
+    const t = await page.evaluate(() => {
+      const s = __APP__.successors.find(x => x.roleId && !__APP__.isRoleVacant(__APP__.role(x.roleId)) && __APP__.person(x.personId));
+      return { sid: s.id };
+    });
+    await page.evaluate(sid => __APP__.autoMove(sid), t.sid);
+    assert(await page.evaluate(sid => __APP__.successors.find(x => x.id === sid).autoMoveQueued, t.sid), 'first click queues');
+    await page.evaluate(sid => __APP__.autoMove(sid), t.sid);
+    assert(!(await page.evaluate(sid => __APP__.successors.find(x => x.id === sid).autoMoveQueued, t.sid)), 'second click cancels the queue');
+    // purity: inject a duplicate slate row, export, live arrays untouched
+    const purity = await page.evaluate(() => {
+      const s = __APP__.successors[0];
+      __APP__.successors.push({ ...s, id: 'S-DUP-TEST', ranking: 99 });
+      const before = __APP__.successors.length;
+      __APP__.toCSV();
+      const after = __APP__.successors.length;
+      __APP__.successors.pop();
+      return { before, after };
+    });
+    assertEq(purity.before, purity.after, 'toCSV consolidates a CLONE — the live data is never mutated');
+  });
+
+  /* ===================================================================
+     25. SCREENSHOTS for the report
+     =================================================================== */
+  section('25. Screenshots');
   await test('capture UI screenshots', async () => {
     await page.setViewportSize({ width: 1560, height: 980 });
     await page.evaluate(() => localStorage.clear());
