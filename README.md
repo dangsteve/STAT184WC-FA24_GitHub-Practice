@@ -1,56 +1,95 @@
-# GitHub Setup and Practice Assignment
-This assignment involves multiple steps and will possibly use unfamiliar terminology. Go slowly, read and follow instructions carefully, and you will be alright!
+# Succession Planner
 
+A complete succession-planning tool for HR teams in **one HTML file**, with a plain
+CSV as its entire database. No install, no server, no accounts, no dependencies —
+double-click the file, open your CSV, and plan.
 
-**(10 points) Assignment Instructions**
+![Board view](tests/screen_board.png)
 
-1. Create your own GitHub profile/ID (very useful to include on job or graduate school applications)  
-2. Create a new repository, known as a repo, for practice
-   - Find a green "New" button and add a repository
-   - You can provide it any name you choose
-   - Keep the repo public
-   - Initialize it with a "REAMDE" file
-3. Create a copy of Dr. Phadke's STAT184WC-FA24_GitHub-Practice repo
-   - Go to the link where these instructions are located
-   - Look for a "View on GitHub" button somewhere on this page OR just search GitHub for "sayaliph" and find the repo from among the list of repositories
-   - "Fork" Dr. Phadke's assignment repo to create your own copy to edit
-   - Your copy of the repo should say "[your-userID] / STAT184WC-FA24_GitHub-Practice" at the top with a tiny note saying it was forked from sayaliph
-   - Click on the "README.md" > click Edit button (pencil icon in upper right) to edit your copy of the repo
-   - Scroll to the bottom of the document
-4. **Add a row** in the table below with your information 
-    - Follow the pattern for the vertical bar character (next to the "]" key)... use the "Sayali Phadke" row as a template
-    - (2 points) first & last name  
-    - (2 points) class section
-    - (2 points) github id (you chose this when creating your profile)
-    - (2 points) url for GitHub repo you created in Step 2
-    - (2 points) commit your changes and submit a pull request
-        - Click on the green "Commit changes" button
-            - Write a **descriptive** commit message (e.g. "added Sayali Phadke to class table")
-            - Push the commit to the "Master branch..."
-            - Click green button "Commit file change"
-5. Merge your updated copy of the repo with Dr. Phadke's repo
-    - Click on "Pull requests" at the top of the page >> click green button "New Pull Request"
-    - GitHub will take you to MY (Dr. Phadke's) copy of the repo (sayaliph / STAT184WC-FA24_GitHub-Practice) at the top
-    - Click the green button "Create pull request"
-    - Describe the change again (e.g. "added Sayali Phadke to class table")
-    - Click the green button "Create pull request"
-    - Job done!
-6. (ungraded) pat yourself on the back
- 
-**Important**: Your entry may NOT appear on the class table right away. Once you submit the "pull request" the owner of the repo (me) needs to approve and merge it into the "master" before your entry will appear in the class table on the website. 
+## Why it's built this way
 
-<br>
+HR teams live in spreadsheets and shared drives. This tool meets them there:
+the single `succession_planner.html` runs offline in any Chromium browser, and
+the CSV it reads and writes is the same file analysts can open in Excel. There
+is no build step, no framework, and no external request of any kind — the app
+is self-contained down to writing and reading its own `.xlsx` workbooks.
 
+## What it does
 
-# Class GitHub Table 
+- **Succession boards** — roles grouped by level across custom tabs, with
+  drag-and-drop candidate slates, ranked priorities, approvals, and automatic
+  backfill cascades when a seat opens up.
+- **A chess board for every role** — the incumbent as King, the slate as
+  Queen→Pawn. Drag pieces to swap, drag onto the throne to stage a succession;
+  nothing is real until Save. Piece assignment is configurable (by rank, or
+  mapped from any field — e.g. *Ready Now = Queen*).
+- **Org chart** — a pan/zoom reporting tree built from each role's *Reports To*
+  field, with dashed inferred placement for roles that haven't been wired yet.
+- **Rules engine** — plain-language guardrails: eligibility requirements
+  (require or forbid a match, scoped to chosen roles), person-level movement
+  blocks, and auto-backfill charts. One shared guard enforces rules on every
+  path a person can move through — manual approvals, auto-moves, queues, and
+  cascades.
+- **Per-plan readiness** — the same person can be *Ready Now* for one role and
+  *3–5 Years* for another; rules and boards read the plan-level value.
+- **Insights dashboard** — coverage and vacancy KPIs plus user-built widgets
+  (counts, %, sums, averages, bar/pie/donut) with multiple AND filter
+  conditions and hover tooltips.
+- **Customization without code** — add typed custom fields (text, number,
+  true/false, dropdown lists), rename or hide built-in fields, re-type
+  built-ins, and pick table columns. All of it stored in the CSV so the whole
+  team shares one configuration.
+- **Excel-grade import/export** — a self-contained xlsx writer/reader
+  (STORE + DEFLATE zip handling, shared strings). Every import goes through a
+  review with a per-change preview (old → new, uncheck to skip, edit inline),
+  a revert guard that refuses to silently undo an approved move, and a
+  downloadable error report. A 25,000-row sheet imports in under a second.
+- **Sharing** — export one board or several (with the rules that govern them),
+  or hand a colleague a copy of the program itself with chosen features locked
+  off. Merge returned files back with full change review.
+- **Safety** — 40-step undo, autosaved browser backup with crash recovery,
+  remembered file handles (open → edit → Ctrl+S overwrites in place), and an
+  append-only history log stored inside the CSV.
 
-| Name              | Class Section     | GitHub ID            | website for a GitHub repo            |  
-|:------------------|:------------------|:---------------------|:-------------------------------------|  
-| Sayali Phadke     | Section 001       | sayaliph             | https://github.com/sayaliph/test     |
+![Chess view](tests/screen_chess.png)
 
+## Testing
 
-<br>
+The project is verified by a **158-scenario Playwright suite** that drives the
+real UI in headless Chromium — clicking actual buttons, firing real
+drag-and-drop, and asserting after every mutation that the change round-trips
+through the CSV byte-for-byte. It covers hostile input (quote/comma/XSS
+payloads), duplicate and dangling data, 3,000-person scale (full render in
+~260 ms), the 25,000-row import cap, and a regression test for every bug ever
+found. See [`tests/STRESS_TEST_REPORT.md`](tests/STRESS_TEST_REPORT.md).
 
-| Name              | Class Section     | GitHub ID            | website for a GitHub repo            |  
-|:------------------|:------------------|:---------------------|:-------------------------------------|  
-| Steve Dang        | Section 001       | dangsteve            | https://github.com/dangsteve/STAT184 |
+```bash
+npm install -g playwright   # once
+NODE_PATH=$(npm root -g) node tests/stress_test.cjs
+```
+
+## Getting started
+
+1. Download `succession_planner.html` and `succession_demo.csv`.
+2. Open the HTML file in Chrome or Edge.
+3. Click **Open CSV / Excel** and pick the demo file.
+4. Follow [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) for a 5-minute tour, or the
+   [Quick Start](Succession_Planner_Quick_Start.docx) /
+   [full guide](SUCCESSION_PLANNER_GUIDE.md) for everything else.
+
+| File | Purpose |
+|---|---|
+| `succession_planner.html` | The entire application |
+| `succession_demo.csv` | Small demo dataset (every feature switched on) |
+| `succession_data.csv` | Full-size test dataset (150 people / 72 roles) |
+| `SUCCESSION_PLANNER_GUIDE.md` | User guide |
+| `DEMO_SCRIPT.md` | 5-minute demo walkthrough |
+| `tests/` | Playwright stress suite + report + screenshots |
+
+## Technical notes
+
+Vanilla JavaScript (~5,000 lines), zero runtime dependencies, one file.
+Event-delegated UI (no inline handlers, no user data interpolated into code),
+schema-stable CSV round-trips that preserve unknown columns, File System
+Access API with IndexedDB-persisted handles, and a hand-rolled zip/xlsx layer.
+Everything a framework would do is done deliberately and visibly instead.
